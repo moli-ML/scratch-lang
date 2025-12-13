@@ -1,0 +1,7 @@
+PyQt5>=5.15.0
+Pillow>=9.0.0
+
+# 开发依赖
+# pytest>=7.0.0
+# pytest-cov>=4.0.0
+# mypy>=1.0.0
