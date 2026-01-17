@@ -391,5 +391,84 @@ class TestParserHelpers:
         assert self.parser._get_key_name("A") == "a"
 
 
+class TestNewFeatures:
+    """新功能测试"""
+
+    def setup_method(self):
+        self.parser = ScratchLangParser()
+
+    def test_block_comments(self):
+        """测试块注释"""
+        code = """
+/* 这是块注释
+   可以跨多行 */
+# 小猫
+当绿旗被点击
+  移动 10 步
+"""
+        result = self.parser.parse(code)
+        assert result is not None
+
+    def test_multiline_strings(self):
+        """测试多行字符串"""
+        code = '''
+# 小猫
+当绿旗被点击
+  说 """这是
+多行
+字符串""" 2 秒
+'''
+        cleaned = self.parser._process_multiline_strings(code)
+        assert '"""' not in cleaned
+        assert '\\n' in cleaned
+
+    def test_escape_characters(self):
+        """测试转义字符"""
+        text = "Hello\\nWorld\\tTab"
+        result = self.parser._process_escape_chars(text)
+        assert '\n' in result
+        assert '\t' in result
+
+    def test_extract_js_blocks(self):
+        """测试提取 JS 代码块"""
+        code = """
+#code#
+console.log('test');
+#end#
+
+# 小猫
+"""
+        cleaned, js_blocks = self.parser._extract_js_blocks(code)
+        assert len(js_blocks) == 1
+        assert 'console.log' in js_blocks[0]
+        assert '#code#' not in cleaned
+
+    def test_js_blocks_as_extensions(self):
+        """测试 JS 代码块转换为扩展"""
+        code = """
+# 小猫
+当绿旗被点击
+#code#
+console.log('block1');
+#end#
+    说 "test" 2 秒
+#code#
+console.log('block2');
+#end#
+结束
+"""
+        result = self.parser.parse(code)
+        extensions = result.project['extensions']
+        assert 'inlinecode1' in extensions
+        assert 'inlinecode2' in extensions
+
+        # 验证 JS 代码保存在 extensionURLs 中（TurboWarp 格式）
+        extension_urls = result.project.get('extensionURLs', {})
+        assert 'inlinecode1' in extension_urls
+        assert 'inlinecode2' in extension_urls
+        assert extension_urls['inlinecode1'].startswith('data:application/javascript,')
+        assert 'console.log' in extension_urls['inlinecode1']
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

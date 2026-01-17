@@ -4,6 +4,7 @@
 """
 import re
 import os
+import json
 from .builder import SB3Builder
 from .blocks import BlockDefinitions
 from .exceptions import ParseError, SecurityError, AssetError
@@ -11,17 +12,24 @@ from .constants import (
     SPECIAL_TARGETS, KEY_MAP, TARGET_STAGE,
     ROTATION_STYLES, STOP_OPTIONS, DRAG_MODES
 )
+from .extensions import extension_manager
 
 class ScratchLangParser:
-    def __init__(self):
+    def __init__(self, security_enabled=True):
         self.builder = SB3Builder()
         self.blocks_def = BlockDefinitions.get_all_blocks()
         self.has_stage = False
         self.current_dir = os.getcwd()
+        self.security_enabled = security_enabled
 
         # 使用常量模块中的映射
         self.SPECIAL_TARGETS = SPECIAL_TARGETS
         self.KEY_MAP = KEY_MAP
+
+        # 自定义积木存储 {角色名: {积木名: {proccode, argumentids, argumentnames, warp}}}
+        self.custom_blocks = {}
+        # 当前正在解析的自定义积木的参数 {参数名: 参数ID}
+        self.current_proc_args = {}
         
     def clean_path(self, path):
         """清理文件路径，去除不可见字符"""
@@ -39,12 +47,13 @@ class ScratchLangParser:
             resolved = os.path.normpath(os.path.join(self.current_dir, path))
 
         # 安全检查：确保解析后的路径在允许的目录内
-        resolved_real = os.path.realpath(resolved)
-        base_real = os.path.realpath(self.current_dir)
+        if self.security_enabled:
+            resolved_real = os.path.realpath(resolved)
+            base_real = os.path.realpath(self.current_dir)
 
-        # 检查路径是否在项目目录或其子目录内
-        if not resolved_real.startswith(base_real + os.sep) and resolved_real != base_real:
-            raise SecurityError(f"路径 '{path}' 超出项目目录范围，已拒绝访问")
+            # 检查路径是否在项目目录或其子目录内
+            if not resolved_real.startswith(base_real + os.sep) and resolved_real != base_real:
+                raise SecurityError(f"路径 '{path}' 超出项目目录范围，已拒绝访问")
 
         return resolved
     
@@ -54,9 +63,161 @@ class ScratchLangParser:
         with open(filepath, 'r', encoding='utf-8') as f:
             code = f.read()
         return self.parse(code)
-    
+
+    def _remove_block_comments(self, code):
+        """移除块注释 /* */"""
+        result = []
+        i = 0
+        in_comment = False
+
+        while i < len(code):
+            if not in_comment:
+                if code[i:i+2] == '/*':
+                    in_comment = True
+                    i += 2
+                else:
+                    result.append(code[i])
+                    i += 1
+            else:
+                if code[i:i+2] == '*/':
+                    in_comment = False
+                    i += 2
+                else:
+                    # 保留换行符以维持行号
+                    if code[i] == '\n':
+                        result.append('\n')
+                    i += 1
+
+        return ''.join(result)
+
+    def _process_escape_chars(self, text):
+        """处理转义字符"""
+        escape_map = {
+            '\\n': '\n',
+            '\\t': '\t',
+            '\\r': '\r',
+            '\\\\': '\\',
+            '\\"': '"',
+            "\\'": "'",
+        }
+        for escape, char in escape_map.items():
+            text = text.replace(escape, char)
+        return text
+
+    def _process_multiline_strings(self, code):
+        """处理多行字符串 \"""...\""" 转换为单行"""
+        result = []
+        i = 0
+        while i < len(code):
+            if code[i:i+3] == '"""':
+                # 找到多行字符串开始
+                i += 3
+                string_content = []
+                while i < len(code) and code[i:i+3] != '"""':
+                    string_content.append(code[i])
+                    i += 1
+                if code[i:i+3] == '"""':
+                    i += 3
+                # 将换行转换为 \n
+                content = ''.join(string_content).replace('\n', '\\n')
+                result.append('"' + content + '"')
+            else:
+                result.append(code[i])
+                i += 1
+        return ''.join(result)
+
+    def _extract_js_blocks(self, code):
+        """提取 #code# ... #end# 块中的 JavaScript 代码
+
+        Args:
+            code: 源代码
+
+        Returns:
+            tuple: (处理后的代码, JS代码块列表)
+        """
+        js_blocks = []
+        result = []
+        i = 0
+        in_js_block = False
+        js_content = []
+        block_indent = 0
+
+        lines = code.split('\n')
+        for line in lines:
+            stripped = line.strip()
+            if stripped == '#code#':
+                in_js_block = True
+                js_content = []
+                # 保存缩进级别
+                block_indent = len(line) - len(line.lstrip())
+                # 用占位符替换 #code# 块，保留缩进
+                js_blocks.append(None)  # 占位，稍后填充
+                placeholder = ' ' * block_indent + f'__INLINE_CODE_{len(js_blocks)}__'
+                result.append(placeholder)
+            elif stripped == '#end#' and in_js_block:
+                in_js_block = False
+                js_blocks[-1] = '\n'.join(js_content)
+                result.append('')  # 保留行号
+            elif in_js_block:
+                js_content.append(line)
+                result.append('')  # 保留行号
+            else:
+                result.append(line)
+
+        return '\n'.join(result), js_blocks
+
+    def _extract_extension_imports(self, code):
+        """提取扩展导入语句
+
+        Args:
+            code: 源代码
+
+        Returns:
+            tuple: (处理后的代码, 扩展文件路径列表)
+        """
+        extension_files = []
+        result = []
+
+        lines = code.split('\n')
+        for line in lines:
+            stripped = line.strip()
+            # 匹配: 导入扩展: "file.js" 或 import extension: "file.js"
+            match = re.match(r'(?:导入扩展|import\s+extension)\s*:\s*["\']([^"\']+)["\']', stripped)
+            if match:
+                extension_files.append(match.group(1))
+                result.append('')  # 保留行号
+            else:
+                result.append(line)
+
+        return '\n'.join(result), extension_files
+
     def parse(self, code):
         """解析代码"""
+        # 预处理：移除块注释 /* */
+        code = self._remove_block_comments(code)
+        # 预处理：处理多行字符串 """..."""
+        code = self._process_multiline_strings(code)
+        # 预处理：提取扩展导入
+        code, extension_files = self._extract_extension_imports(code)
+        # 预处理：提取 #code# 块
+        code, js_blocks = self._extract_js_blocks(code)
+
+        # 存储 js_blocks 供后续使用
+        self.js_blocks = js_blocks
+        self.inline_code_counter = 0
+
+        # 处理扩展导入
+        for ext_file in extension_files:
+            try:
+                ext_path = self.resolve_path(ext_file)
+                with open(ext_path, 'r', encoding='utf-8') as f:
+                    js_code = f.read()
+                ext_id = extension_manager.parse_js_extension(js_code)
+                if ext_id:
+                    self.builder.add_extension(ext_id)
+            except Exception as e:
+                raise ParseError(f"无法加载扩展 '{ext_file}': {e}")
+
         lines = code.split('\n')
         i = 0
         
@@ -113,14 +274,67 @@ class ScratchLangParser:
             if self.is_event_block(stripped):
                 i = self.parse_script(lines, i)
                 continue
-            
+
+            # 自定义积木定义
+            if self.is_custom_block_definition(stripped):
+                i = self.parse_custom_block_definition(lines, i)
+                continue
+
             i += 1
         
         if self.builder.current_sprite is not None:
             self.builder.finalize_sprite()
-        
+
         return self.builder
-    
+
+    def _create_inline_code_block(self, placeholder, parent, top_level):
+        """创建内联代码积木
+
+        Args:
+            placeholder: 占位符字符串，如 __INLINE_CODE_1__
+            parent: 父积木 ID
+            top_level: 是否为顶层积木
+
+        Returns:
+            积木 ID
+        """
+        import re
+        match = re.match(r'__INLINE_CODE_(\d+)__', placeholder)
+        if not match:
+            return None
+
+        idx = int(match.group(1)) - 1  # 转换为 0-based 索引
+        if idx >= len(self.js_blocks):
+            return None
+
+        js_code = self.js_blocks[idx]
+        ext_id = f"inlinecode{idx + 1}"
+
+        # 注册扩展（如果还没注册）
+        self.builder.add_extension(ext_id)
+        self.builder.add_custom_extension_code(ext_id, js_code)
+
+        # 创建调用积木
+        opcode = f"{ext_id}_run"
+        block_id = self.builder.generate_id()
+
+        block = {
+            "opcode": opcode,
+            "next": None,
+            "parent": parent,
+            "inputs": {},
+            "fields": {},
+            "shadow": False,
+            "topLevel": top_level
+        }
+
+        if top_level:
+            block["x"] = 50
+            block["y"] = 50
+
+        self.builder.current_sprite["blocks"][block_id] = block
+        return block_id
+
     def handle_keyword(self, keyword, value):
         """处理关键字定义"""
         if keyword in ['背景', 'backdrop']:
@@ -178,8 +392,239 @@ class ScratchLangParser:
         if keyword in ['列表', 'list']:
             self.builder.add_list(value.strip(), [])
             return True
-        
+
+        if keyword in ['云变量', 'cloud']:
+            if '=' in value:
+                var_name, var_value = value.split('=', 1)
+                var_name = var_name.strip()
+                var_value = var_value.strip()
+                try:
+                    var_value = float(var_value) if '.' in var_value else int(var_value)
+                except ValueError:
+                    var_value = 0  # 云变量只能是数字
+            else:
+                var_name = value.strip()
+                var_value = 0
+            self.builder.add_cloud_variable(var_name, var_value)
+            return True
+
         return False
+
+    def is_custom_block_definition(self, cmd):
+        """判断是否是自定义积木定义"""
+        return cmd.startswith('定义 ') or cmd.startswith('define ')
+
+    def parse_custom_block_definition(self, lines, start_idx):
+        """解析自定义积木定义"""
+        cmd = lines[start_idx].strip()
+
+        # 解析: 定义 积木名(参数1, 参数2) [不刷新屏幕]
+        warp = '不刷新屏幕' in cmd or 'warp' in cmd.lower()
+        cmd = cmd.replace('不刷新屏幕', '').replace('warp', '').strip()
+
+        # 提取积木名和参数
+        match = re.match(r'(?:定义|define)\s+(\S+?)(?:\(([^)]*)\))?$', cmd)
+        if not match:
+            print(f"⚠️ 警告: 无法解析自定义积木定义: {cmd}")
+            return start_idx + 1
+
+        proc_name = match.group(1)
+        args_str = match.group(2) or ""
+        arg_names = [a.strip() for a in args_str.split(',') if a.strip()]
+
+        # 生成 proccode (积木签名)
+        proccode = proc_name
+        for _ in arg_names:
+            proccode += " %s"
+
+        # 生成参数 ID
+        arg_ids = [self.builder.generate_id() for _ in arg_names]
+
+        # 存储自定义积木信息
+        sprite_name = self.builder.current_sprite["name"]
+        if sprite_name not in self.custom_blocks:
+            self.custom_blocks[sprite_name] = {}
+
+        self.custom_blocks[sprite_name][proc_name] = {
+            "proccode": proccode,
+            "argumentids": arg_ids,
+            "argumentnames": arg_names,
+            "warp": warp
+        }
+
+        # 设置当前过程参数（用于解析积木体内的参数引用）
+        self.current_proc_args = dict(zip(arg_names, arg_ids))
+
+        # 创建 procedures_definition 积木
+        definition_id = self.builder.generate_id()
+        prototype_id = self.builder.generate_id()
+
+        # 创建参数 reporter 积木
+        prototype_inputs = {}
+        for arg_name, arg_id in zip(arg_names, arg_ids):
+            reporter_id = self.builder.generate_id()
+            self.builder.current_sprite["blocks"][reporter_id] = {
+                "opcode": "argument_reporter_string_number",
+                "next": None,
+                "parent": prototype_id,
+                "inputs": {},
+                "fields": {"VALUE": [arg_name, None]},
+                "shadow": True,
+                "topLevel": False
+            }
+            prototype_inputs[arg_id] = [1, reporter_id]
+
+        # 创建 prototype 积木
+        self.builder.current_sprite["blocks"][prototype_id] = {
+            "opcode": "procedures_prototype",
+            "next": None,
+            "parent": definition_id,
+            "inputs": prototype_inputs,
+            "fields": {},
+            "shadow": True,
+            "topLevel": False,
+            "mutation": {
+                "tagName": "mutation",
+                "children": [],
+                "proccode": proccode,
+                "argumentids": json.dumps(arg_ids),
+                "argumentnames": json.dumps(arg_names),
+                "argumentdefaults": json.dumps(["" for _ in arg_names]),
+                "warp": "true" if warp else "false"
+            }
+        }
+
+        # 创建 definition 积木
+        self.builder.current_sprite["blocks"][definition_id] = {
+            "opcode": "procedures_definition",
+            "next": None,
+            "parent": None,
+            "inputs": {"custom_block": [1, prototype_id]},
+            "fields": {},
+            "shadow": False,
+            "topLevel": True,
+            "x": 50 + (len(self.builder.current_sprite["blocks"]) % 3) * 300,
+            "y": 50 + (len(self.builder.current_sprite["blocks"]) // 3) * 200
+        }
+
+        # 解析积木体
+        base_indent = len(lines[start_idx]) - len(lines[start_idx].lstrip())
+        idx, first_child_id = self._parse_block_sequence(lines, start_idx + 1, None, base_indent=base_indent)
+
+        if first_child_id:
+            self.builder.current_sprite["blocks"][definition_id]["next"] = first_child_id
+            self.update_parent_chain(first_child_id, definition_id)
+
+        # 跳过"结束"标记
+        if idx < len(lines) and lines[idx].strip() in ['结束', 'end', '}']:
+            idx += 1
+
+        # 清除当前过程参数
+        self.current_proc_args = {}
+
+        print(f"✅ 定义自定义积木: {proc_name}({', '.join(arg_names)})")
+        return idx
+
+    def get_custom_block_info(self, cmd):
+        """检查命令是否是自定义积木调用，返回积木信息和参数值"""
+        sprite_name = self.builder.current_sprite["name"]
+        if sprite_name not in self.custom_blocks:
+            return None, None
+
+        # 尝试匹配每个自定义积木
+        for proc_name, proc_info in self.custom_blocks[sprite_name].items():
+            # 检查命令是否以积木名开头
+            if cmd.startswith(proc_name):
+                rest = cmd[len(proc_name):].strip()
+                arg_count = len(proc_info["argumentnames"])
+
+                if arg_count == 0:
+                    if not rest:  # 无参数积木，命令应该只有积木名
+                        return proc_info, []
+                else:
+                    # 解析参数值
+                    arg_values = self._parse_call_arguments(rest, arg_count)
+                    if arg_values is not None:
+                        return proc_info, arg_values
+
+        return None, None
+
+    def _parse_call_arguments(self, args_str, expected_count):
+        """解析自定义积木调用的参数"""
+        if not args_str:
+            return [] if expected_count == 0 else None
+
+        # 支持两种格式: "值1 值2" 或 "(值1, 值2)"
+        if args_str.startswith('(') and args_str.endswith(')'):
+            args_str = args_str[1:-1]
+            parts = self._split_by_comma(args_str)
+        else:
+            parts = self._split_by_space(args_str)
+
+        if len(parts) != expected_count:
+            return None
+
+        return parts
+
+    def _split_by_space(self, text):
+        """按空格分割（保留引号内的空格）"""
+        parts = []
+        current = ""
+        in_quotes = False
+        quote_char = None
+
+        for char in text:
+            if char in ['"', "'"]:
+                if not in_quotes:
+                    in_quotes = True
+                    quote_char = char
+                elif char == quote_char:
+                    in_quotes = False
+                    quote_char = None
+                current += char
+            elif char == ' ' and not in_quotes:
+                if current.strip():
+                    parts.append(current.strip())
+                current = ""
+            else:
+                current += char
+
+        if current.strip():
+            parts.append(current.strip())
+
+        return parts
+
+    def create_custom_block_call(self, proc_info, arg_values, parent=None):
+        """创建自定义积木调用"""
+        call_id = self.builder.generate_id()
+
+        # 构建输入参数
+        inputs = {}
+        for arg_id, arg_value in zip(proc_info["argumentids"], arg_values):
+            inputs[arg_id] = self._parse_value(arg_value)
+
+        # 创建调用积木
+        self.builder.current_sprite["blocks"][call_id] = {
+            "opcode": "procedures_call",
+            "next": None,
+            "parent": parent,
+            "inputs": inputs,
+            "fields": {},
+            "shadow": False,
+            "topLevel": False,
+            "mutation": {
+                "tagName": "mutation",
+                "children": [],
+                "proccode": proc_info["proccode"],
+                "argumentids": json.dumps(proc_info["argumentids"]),
+                "warp": "true" if proc_info["warp"] else "false"
+            }
+        }
+
+        if parent:
+            self.builder.current_sprite["blocks"][parent]["next"] = call_id
+
+        return call_id
 
     def is_event_block(self, cmd):
         """判断是否是事件积木"""
@@ -203,41 +648,44 @@ class ScratchLangParser:
         idx = start_idx
         first_id = None
         last_id = parent_id
-        
+
         while idx < len(lines):
             line = lines[idx]
             stripped = line.strip()
-            
+
             if not stripped or stripped.startswith('//'):
                 idx += 1
                 continue
-            
+
             current_indent = len(line) - len(line.lstrip())
-            
-            # 🔥 修复1：只有在控制结构内才检查缩进
+
+            # 只有在控制结构内才检查缩进
             if base_indent != -1 and current_indent <= base_indent:
                 break
-            
-            # 🔥 修复2：只有在控制结构内才处理"结束"/"否则"
+
+            # 只有在控制结构内才处理"结束"/"否则"
             if base_indent != -1:  # 在控制结构内
                 if stripped in ['结束', 'end', '}', '否则', 'else']:
                     break
-            
-            # 🔥 修复3：在事件块级别，遇到新的事件块或角色定义才停止
+
+            # 在事件块级别，遇到新的事件块或角色定义才停止
             if self.is_event_block(stripped) or stripped.startswith(('#', '@', ':')):
                 break
-            
+
             if self.is_control_structure(stripped):
                 idx, new_id = self.parse_control_block(lines, idx, last_id)
             else:
                 new_id = self.create_block(stripped, parent=last_id)
                 idx += 1
-            
+
             if new_id:
                 if not first_id:
                     first_id = new_id
+                # 设置前一个积木的 next 指针
+                if last_id and last_id != parent_id:
+                    self.builder.current_sprite["blocks"][last_id]["next"] = new_id
                 last_id = new_id
-        
+
         return idx, first_id
         
     def is_control_structure(self, cmd):
@@ -275,19 +723,43 @@ class ScratchLangParser:
         return idx, block_id
 
     def update_parent_chain(self, start_id, parent_id):
-        """更新积木链的parent"""
+        """更新积木链的parent
+
+        第一个积木的 parent 是控制块
+        后续积木的 parent 是前一个积木
+        """
         current_id = start_id
+        is_first = True
+        prev_id = None
+
         while current_id:
-            self.builder.current_sprite["blocks"][current_id]["parent"] = parent_id
+            if is_first:
+                # 第一个积木的 parent 是控制块
+                self.builder.current_sprite["blocks"][current_id]["parent"] = parent_id
+                is_first = False
+            else:
+                # 后续积木的 parent 是前一个积木
+                self.builder.current_sprite["blocks"][current_id]["parent"] = prev_id
+
+            prev_id = current_id
             current_id = self.builder.current_sprite["blocks"][current_id].get("next")
     
     # ==================== 核心解析逻辑 ====================
     
     def create_block(self, cmd, parent=None, top_level=False):
         """根据命令创建积木"""
+        # 处理内联代码占位符
+        if cmd.strip().startswith('__INLINE_CODE_'):
+            return self._create_inline_code_block(cmd.strip(), parent, top_level)
+
         if cmd.strip().startswith(('说 ', '想 ')):
             return self._create_say_think_block(cmd, parent, top_level)
-        
+
+        # 检查是否是自定义积木调用
+        proc_info, arg_values = self.get_custom_block_info(cmd)
+        if proc_info is not None:
+            return self.create_custom_block_call(proc_info, arg_values, parent)
+
         for block_def in self.blocks_def.values():
             if "pattern" not in block_def:
                 continue
@@ -359,7 +831,13 @@ class ScratchLangParser:
                             fields[field_name] = group_idx
                 
                 block_id = self.builder.add_block(opcode, inputs, fields, parent, top_level)
-                
+
+                # 检查是否需要添加扩展
+                if opcode.startswith("music_"):
+                    self.builder.add_extension("music")
+                elif opcode.startswith("pen_"):
+                    self.builder.add_extension("pen")
+
                 # 🔥 设置所有 shadow blocks 的 parent
                 for shadow_id in shadow_blocks.values():
                     if shadow_id and shadow_id in self.builder.current_sprite["blocks"]:
@@ -502,7 +980,7 @@ class ScratchLangParser:
         
         # 7. 字符串
         if (text.startswith('"') and text.endswith('"')) or (text.startswith("'") and text.endswith("'")):
-            return [1, [10, text[1:-1]]]
+            return [1, [10, self._process_escape_chars(text[1:-1])]]
             
         # 8. Shadow Block 触发器
         if text in self.SPECIAL_TARGETS:
@@ -581,10 +1059,24 @@ class ScratchLangParser:
     def _parse_variable_or_reporter(self, text):
         """解析变量或reporter积木"""
         text = text.strip()
-        
+
         if text.startswith('~'):
             var_or_reporter = text[1:].strip()
-            
+
+            # 首先检查是否是自定义积木的参数
+            if var_or_reporter in self.current_proc_args:
+                arg_id = self.builder.generate_id()
+                self.builder.current_sprite["blocks"][arg_id] = {
+                    "opcode": "argument_reporter_string_number",
+                    "next": None,
+                    "parent": None,
+                    "inputs": {},
+                    "fields": {"VALUE": [var_or_reporter, None]},
+                    "shadow": False,
+                    "topLevel": False
+                }
+                return [2, arg_id]
+
             builtin_reporters = {
                 "回答": "sensing_answer",
                 "x坐标": "motion_xposition",
@@ -808,11 +1300,11 @@ class ScratchLangParser:
     def _parse_say_part(self, part):
         """解析"说"内容的单个部分"""
         part = part.strip()
-        
+
         string_match = re.match(r'^["\'](.+)["\']$', part)
         if string_match:
-            return [1, [10, string_match.group(1)]]
-        
+            return [1, [10, self._process_escape_chars(string_match.group(1))]]
+
         return self._parse_variable_or_reporter(part)
     
     def _get_key_name(self, value):

@@ -7,10 +7,11 @@ import tempfile
 from PyQt5.QtWidgets import (QMainWindow, QAction, QFileDialog, QMessageBox,
                              QTextEdit, QVBoxLayout, QWidget, QSplitter, QApplication,
                              QDialog, QLabel, QLineEdit, QPushButton, QHBoxLayout,
-                             QCheckBox, QGridLayout, QMenu)
+                             QCheckBox, QGridLayout, QMenu, QDockWidget)
 from PyQt5.QtCore import Qt, QTimer, QSettings
 from PyQt5.QtGui import QFont, QTextCursor, QTextDocument
 from .editor import CodeEditor
+from .syntax_tree import SyntaxTreePanel
 from compiler.parser import ScratchLangParser
 
 class MainWindow(QMainWindow):
@@ -20,6 +21,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.current_file = None
         self.recent_files = []
+        self.security_enabled = True
         self.settings = QSettings("ScratchLang", "IDE")
         self.load_settings()
         self.init_ui()
@@ -28,7 +30,7 @@ class MainWindow(QMainWindow):
     def init_ui(self):
         self.setWindowTitle("ScratchLang IDE")
         self.setGeometry(100, 100, 1200, 800)
-        
+
         # 创建编辑器
         self.editor = CodeEditor()
         self.editor.setPlaceholderText("在这里输入ScratchLang代码...")
@@ -36,26 +38,36 @@ class MainWindow(QMainWindow):
         # 连接语法错误信号
         self.editor.syntax_errors_changed.connect(self.on_syntax_errors_changed)
 
+        # 连接文本变化信号以更新语法树
+        self.editor.textChanged.connect(self.update_syntax_tree)
+
         # 创建输出窗口
         self.output = QTextEdit()
         self.output.setReadOnly(True)
         self.output.setMaximumHeight(150)
         self.output.setFont(QFont("Consolas", 10))
-        
+
         # 布局
         splitter = QSplitter(Qt.Vertical)
         splitter.addWidget(self.editor)
         splitter.addWidget(self.output)
         splitter.setStretchFactor(0, 4)
         splitter.setStretchFactor(1, 1)
-        
+
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.addWidget(splitter)
         layout.setContentsMargins(0, 0, 0, 0)
-        
+
         self.setCentralWidget(container)
-        
+
+        # 创建语法树面板（侧边栏）
+        self.syntax_tree_panel = SyntaxTreePanel()
+        self.syntax_tree_dock = QDockWidget("语法树", self)
+        self.syntax_tree_dock.setWidget(self.syntax_tree_panel)
+        self.syntax_tree_dock.setMinimumWidth(250)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.syntax_tree_dock)
+
         # 创建菜单
         self.create_menus()
         
@@ -211,6 +223,13 @@ class MainWindow(QMainWindow):
         self.dark_theme_action.triggered.connect(self.toggle_theme)
         view_menu.addAction(self.dark_theme_action)
 
+        view_menu.addSeparator()
+
+        self.security_action = QAction("启用路径安全检查", self)
+        self.security_action.setCheckable(True)
+        self.security_action.triggered.connect(self.toggle_security)
+        view_menu.addAction(self.security_action)
+
         # 加载主题设置
         is_dark = self.settings.value("dark_theme", False, type=bool)
         self.dark_theme_action.setChecked(is_dark)
@@ -218,6 +237,9 @@ class MainWindow(QMainWindow):
             self.apply_dark_theme()
         else:
             self.apply_light_theme()
+
+        # 加载安全设置
+        self.security_action.setChecked(self.security_enabled)
     
     def create_toolbar(self):
         toolbar = self.addToolBar("工具栏")
@@ -380,8 +402,8 @@ class MainWindow(QMainWindow):
             # 解析代码
             self.output.append("🔍 解析代码...")
             QApplication.processEvents()
-            
-            parser = ScratchLangParser()
+
+            parser = ScratchLangParser(security_enabled=self.security_enabled)
             parser.parse_file(temp_file)
             
             self.output.append("✅ 解析完成")
@@ -630,6 +652,11 @@ Copyright © 2024
         self.output.append(f"\n共 {len(errors)} 个问题")
         self.statusBar().showMessage(f"发现 {len(errors)} 个语法问题")
 
+    def update_syntax_tree(self):
+        """更新语法树面板"""
+        code = self.editor.toPlainText()
+        self.syntax_tree_panel.update_tree(code)
+
     def closeEvent(self, event):
         """关闭窗口事件"""
         if self.check_save_changes():
@@ -643,10 +670,12 @@ Copyright © 2024
     def load_settings(self):
         """加载设置"""
         self.recent_files = self.settings.value("recent_files", []) or []
+        self.security_enabled = self.settings.value("security_enabled", True, type=bool)
 
     def save_settings(self):
         """保存设置"""
         self.settings.setValue("recent_files", self.recent_files)
+        self.settings.setValue("security_enabled", self.security_enabled)
 
     def setup_autosave(self):
         """设置自动保存定时器"""
@@ -797,6 +826,13 @@ Copyright © 2024
         """应用浅色主题"""
         self.setStyleSheet("")  # 恢复默认样式
         self.statusBar().showMessage("已切换到浅色主题", 2000)
+
+    def toggle_security(self):
+        """切换安全检查"""
+        self.security_enabled = self.security_action.isChecked()
+        self.settings.setValue("security_enabled", self.security_enabled)
+        status = "已启用" if self.security_enabled else "已禁用"
+        self.statusBar().showMessage(f"路径安全检查{status}", 2000)
 
     def show_find_dialog(self):
         """显示查找对话框"""

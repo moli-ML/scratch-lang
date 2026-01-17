@@ -6,6 +6,7 @@ import zipfile
 import random
 import string
 from typing import Dict, List, Any, Optional, Union
+from urllib.parse import quote
 from .assets import AssetManager
 
 # 类型别名
@@ -26,6 +27,7 @@ class SB3Builder:
             "targets": [],
             "monitors": [],
             "extensions": [],
+            "extensionURLs": {},
             "meta": {
                 "semver": "3.0.0",
                 "vm": "0.2.0",
@@ -97,10 +99,10 @@ class SB3Builder:
         """
         if not self.stage:
             self.add_sprite("Stage", is_stage=True)
-        
+
         self.current_sprite = self.stage
         self.has_custom_costume = len(self.stage["costumes"]) > 0
-        print("📺 切换到舞台")
+        print("[切换到舞台]")
         return self.current_sprite
     
     def add_costume(self, filepath: str, is_backdrop: bool = False) -> None:
@@ -159,16 +161,16 @@ class SB3Builder:
             if self.current_sprite["isStage"]:
                 default_bg = self.asset_manager.create_default_backdrop()
                 self.current_sprite["costumes"].append(default_bg)
-                print(f"📦 舞台: 使用默认背景")
+                print(f"[舞台] 使用默认背景")
             else:
                 default_costume = self.asset_manager.create_default_svg(
                     self.current_sprite["name"]
                 )
                 self.current_sprite["costumes"].append(default_costume)
-                print(f"📦 {self.current_sprite['name']}: 使用默认造型")
+                print(f"[{self.current_sprite['name']}] 使用默认造型")
         else:
             costume_type = "背景" if self.current_sprite["isStage"] else "造型"
-            print(f"🎨 {self.current_sprite['name']}: {len(self.current_sprite['costumes'])} 个{costume_type}")
+            print(f"[{self.current_sprite['name']}] {len(self.current_sprite['costumes'])} 个{costume_type}")
     
     def generate_id(self, length: int = 20) -> str:
         """生成唯一ID
@@ -193,6 +195,22 @@ class SB3Builder:
         """
         var_id = self.generate_id()
         self.current_sprite["variables"][var_id] = [name, value]
+        return var_id
+
+    def add_cloud_variable(self, name: str, value: Union[int, float] = 0) -> str:
+        """添加云变量
+
+        Args:
+            name: 变量名（会自动添加☁前缀）
+            value: 初始值（只能是数字）
+
+        Returns:
+            str: 变量 ID
+        """
+        var_id = self.generate_id()
+        cloud_name = f"☁ {name}" if not name.startswith("☁") else name
+        # 云变量存储格式: [name, value, True] 第三个参数表示是云变量
+        self.current_sprite["variables"][var_id] = [cloud_name, value, True]
         return var_id
 
     def add_list(self, name: str, items: Optional[List[Any]] = None) -> str:
@@ -222,7 +240,52 @@ class SB3Builder:
             broadcast_id = self.generate_id()
             self.broadcasts[name] = broadcast_id
         return self.broadcasts[name]
-    
+
+    def add_extension(self, extension_name: str) -> None:
+        """添加扩展
+
+        Args:
+            extension_name: 扩展名称 (如 "music", "pen")
+        """
+        if extension_name not in self.project["extensions"]:
+            self.project["extensions"].append(extension_name)
+
+    def add_custom_extension_code(self, extension_id: str, js_code: str) -> None:
+        """添加自定义扩展 JS 代码（TurboWarp 格式）
+
+        Args:
+            extension_id: 扩展 ID
+            js_code: JavaScript 代码
+        """
+        # 将用户代码包装为 Scratch 扩展格式，创建可执行的积木
+        class_name = extension_id.replace('inlinecode', 'InlineCode')
+        wrapped_code = f"""class {class_name} {{
+  getInfo() {{
+    return {{
+      id: '{extension_id}',
+      name: 'Inline Code',
+      blocks: [
+        {{
+          opcode: 'run',
+          blockType: Scratch.BlockType.COMMAND,
+          text: 'run inline code'
+        }}
+      ]
+    }};
+  }}
+
+  run(args) {{
+    {js_code}
+  }}
+}}
+
+Scratch.extensions.register(new {class_name}());"""
+
+        # 将 JS 代码编码为 data URL
+        encoded_js = quote(wrapped_code, safe='')
+        data_url = f"data:application/javascript,{encoded_js}"
+        self.project["extensionURLs"][extension_id] = data_url
+
     def add_block(
         self,
         opcode: str,

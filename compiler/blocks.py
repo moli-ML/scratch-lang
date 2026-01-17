@@ -1,5 +1,17 @@
 """
 所有Scratch积木的定义
+
+正则表达式语法说明:
+- pattern: 匹配命令的正则表达式，支持中英文双语法
+- (.+?) : 非贪婪匹配，捕获最短匹配内容
+- (.+)  : 贪婪匹配，捕获最长匹配内容
+- \s+   : 匹配一个或多个空白字符
+- \s*   : 匹配零个或多个空白字符
+- $     : 匹配行尾
+- (?:\s|$) : 匹配空白或行尾（非捕获组）
+- |     : 或运算符，用于支持中英文双语法
+
+inputs/fields 中的数字表示正则表达式的捕获组索引
 """
 from typing import Dict, Any, Union, List, Optional
 
@@ -19,7 +31,7 @@ class BlockDefinitions:
         },
         "当按下键": {
             "opcode": "event_whenkeypressed",
-            "pattern": r"当按下\s+(.+?)\s*键",
+            "pattern": r"当按下\s+(.+?)\s*键|when\s+(.+?)\s*key pressed",
             "fields": {"KEY_OPTION": 1}
         },
         "当角色被点击": {
@@ -32,86 +44,86 @@ class BlockDefinitions:
         },
         "当收到": {
             "opcode": "event_whenbroadcastreceived",
-            "pattern": r"当收到\s+(.+)",
+            "pattern": r"当收到\s+(.+)|when I receive\s+(.+)",
             "fields": {"BROADCAST_OPTION": 1}
         },
         "当背景换成": {
             "opcode": "event_whenbackdropswitchesto",
-            "pattern": r"当背景换成\s+(.+)",
+            "pattern": r"当背景换成\s+(.+)|when backdrop switches to\s+(.+)",
             "fields": {"BACKDROP": 1}
         },
     }
-    
+
     # ==================== 动作积木 ====================
     MOTION = {
         "移动步": {
             "opcode": "motion_movesteps",
-            "pattern": r"移动\s+(.+)\s*步",  # 🔥 改为 .+ 并在末尾加 \s*
+            "pattern": r"移动\s+(.+)\s*步|move\s+(.+)\s*steps",
             "inputs": {"STEPS": 1}
         },
         "旋转右": {
             "opcode": "motion_turnright",
-            "pattern": r"旋转右\s+(.+)\s*度",
+            "pattern": r"旋转右\s+(.+)\s*度|turn right\s+(.+)\s*degrees",
             "inputs": {"DEGREES": 1}
         },
         "旋转左": {
             "opcode": "motion_turnleft",
-            "pattern": r"旋转左\s+(.+)\s*度",
+            "pattern": r"旋转左\s+(.+)\s*度|turn left\s+(.+)\s*degrees",
             "inputs": {"DEGREES": 1}
         },
         "移到xy": {
             "opcode": "motion_gotoxy",
-            "pattern": r"移到\s+(.+?)\s+(.+?)$",  # 🔥 两个参数，最后一个用 $
+            "pattern": r"移到\s+(.+?)\s+(.+?)$|go to x:\s*(.+?)\s+y:\s*(.+?)$",
             "inputs": {"X": 1, "Y": 2}
         },
         "移到目标": {
             "opcode": "motion_goto",
-            "pattern": r"移到\s+(.+)$",  # 🔥 匹配到行尾
+            "pattern": r"移到\s+(.+)$|go to\s+(.+)$",
             "inputs": {"TO": 1}
         },
         "面向方向": {
             "opcode": "motion_pointindirection",
-            "pattern": r"面向\s+(.+)\s*方向",
+            "pattern": r"面向\s+(.+)\s*方向|point in direction\s+(.+)",
             "inputs": {"DIRECTION": 1}
         },
         "面向目标": {
             "opcode": "motion_pointtowards",
-            "pattern": r"面向\s+(.+)$",
+            "pattern": r"面向\s+(.+)$|point towards\s+(.+)$",
             "inputs": {"TOWARDS": 1}
         },
         "滑行xy": {
             "opcode": "motion_glidesecstoxy",
-            "pattern": r"在\s+(.+?)\s*秒内滑行到\s+(.+?)\s+(.+?)$",
+            "pattern": r"在\s+(.+?)\s*秒内滑行到\s+(.+?)\s+(.+?)$|glide\s+(.+?)\s*secs to x:\s*(.+?)\s+y:\s*(.+?)$",
             "inputs": {"SECS": 1, "X": 2, "Y": 3}
         },
         "滑行到目标": {
             "opcode": "motion_glideto",
-            "pattern": r"在\s+(.+?)\s*秒内滑行到\s+(.+)$",
+            "pattern": r"在\s+(.+?)\s*秒内滑行到\s+(.+)$|glide\s+(.+?)\s*secs to\s+(.+)$",
             "inputs": {"SECS": 1, "TO": 2}
         },
         "x增加": {
             "opcode": "motion_changexby",
-            "pattern": r"将x坐标增加\s+(.+)$",  # 🔥 改为贪婪匹配到行尾
+            "pattern": r"将x坐标增加\s+(.+)$|change x by\s+(.+)$",
             "inputs": {"DX": 1}
         },
         "x设为": {
             "opcode": "motion_setx",
-            "pattern": r"将x坐标设为\s+(.+)$",
+            "pattern": r"将x坐标设为\s+(.+)$|set x to\s+(.+)$",
             "inputs": {"X": 1}
         },
         "y增加": {
             "opcode": "motion_changeyby",
-            "pattern": r"将y坐标增加\s+(.+)$",
+            "pattern": r"将y坐标增加\s+(.+)$|change y by\s+(.+)$",
             "inputs": {"DY": 1}
         },
         "y设为": {
             "opcode": "motion_sety",
-            "pattern": r"将y坐标设为\s+(.+)$",
+            "pattern": r"将y坐标设为\s+(.+)$|set y to\s+(.+)$",
             "inputs": {"Y": 1}
         },
         "碰到边缘反弹": {
             "opcode": "motion_ifonedgebounce",
-            "pattern": r"碰到边缘就反弹"
+            "pattern": r"碰到边缘就反弹|if on edge, bounce"
         },
         "设置旋转方式": {
             "opcode": "motion_setrotationstyle",
@@ -250,12 +262,12 @@ class BlockDefinitions:
     CONTROL = {
         "等待": {
             "opcode": "control_wait",
-            "pattern": r"等待\s+(.+)\s*秒",  # 🔥
+            "pattern": r"等待\s+(.+)\s*秒|wait\s+(.+)\s*seconds",
             "inputs": {"DURATION": 1}
         },
         "重复": {
             "opcode": "control_repeat",
-            "pattern": r"重复\s+(.+)\s*次",  # 🔥
+            "pattern": r"重复\s+(.+)\s*次|repeat\s+(.+)",
             "inputs": {"TIMES": 1},
             "has_substack": True
         },
@@ -266,57 +278,57 @@ class BlockDefinitions:
         },
         "如果": {
             "opcode": "control_if",
-            "pattern": r"如果\s+(.+?)\s+那么",
+            "pattern": r"如果\s+(.+?)\s+那么|if\s+(.+?)\s+then",
             "inputs": {"CONDITION": 1},
             "has_substack": True
         },
         "等待直到": {
             "opcode": "control_wait_until",
-            "pattern": r"等待直到\s+(.+)",
+            "pattern": r"等待直到\s+(.+)|wait until\s+(.+)",
             "inputs": {"CONDITION": 1}
         },
         "重复执行直到": {
             "opcode": "control_repeat_until",
-            "pattern": r"重复执行直到\s+(.+)",
+            "pattern": r"重复执行直到\s+(.+)|repeat until\s+(.+)",
             "inputs": {"CONDITION": 1},
             "has_substack": True
         },
         "停止全部": {
             "opcode": "control_stop",
-            "pattern": r"停止\s*全部",
+            "pattern": r"停止\s*全部|stop all",
             "fields": {"STOP_OPTION": ["all", None]}
         },
         "停止此脚本": {
             "opcode": "control_stop",
-            "pattern": r"停止\s*(?:此|这个)脚本",
+            "pattern": r"停止\s*(?:此|这个)脚本|stop this script",
             "fields": {"STOP_OPTION": ["this script", None]}
         },
         "停止其他脚本": {
             "opcode": "control_stop",
-            "pattern": r"停止\s*(?:此|这个)角色的其他脚本",
+            "pattern": r"停止\s*(?:此|这个)角色的其他脚本|stop other scripts in sprite",
             "fields": {"STOP_OPTION": ["other scripts in sprite", None]}
         },
         "克隆": {
             "opcode": "control_create_clone_of",
-            "pattern": r"克隆\s+(.+)",
+            "pattern": r"克隆\s+(.+)|create clone of\s+(.+)",
             "inputs": {"CLONE_OPTION": 1}
         },
         "当作为克隆体启动": {
             "opcode": "control_start_as_clone",
-            "pattern": r"当作为克隆体启动"
+            "pattern": r"当作为克隆体启动|when I start as a clone"
         },
         "删除克隆体": {
             "opcode": "control_delete_this_clone",
-            "pattern": r"删除此克隆体"
+            "pattern": r"删除此克隆体|delete this clone"
         },
         "广播": {
             "opcode": "event_broadcast",
-            "pattern": r"广播\s+(.+?)(?:\s|$)",
+            "pattern": r"广播\s+(.+?)(?:\s|$)|broadcast\s+(.+?)(?:\s|$)",
             "inputs": {"BROADCAST_INPUT": 1}
         },
         "广播并等待": {
             "opcode": "event_broadcastandwait",
-            "pattern": r"广播\s+(.+?)\s*并等待",
+            "pattern": r"广播\s+(.+?)\s*并等待|broadcast\s+(.+?)\s*and wait",
             "inputs": {"BROADCAST_INPUT": 1}
         },
     }
@@ -376,41 +388,41 @@ class BlockDefinitions:
     VARIABLES = {
         "设置变量": {
             "opcode": "data_setvariableto",
-            "pattern": r"设置\s+(.+?)\s+为\s+(.+)$",  # 🔥 最后参数到行尾
+            "pattern": r"设置\s+(.+?)\s+为\s+(.+)$|set\s+(.+?)\s+to\s+(.+)$",
             "fields": {"VARIABLE": 1},
             "inputs": {"VALUE": 2}
         },
         "变量增加": {
             "opcode": "data_changevariableby",
-            "pattern": r"将\s+(.+?)\s+增加\s+(.+)$",  # 🔥
+            "pattern": r"将\s+(.+?)\s+增加\s+(.+)$|change\s+(.+?)\s+by\s+(.+)$",
             "fields": {"VARIABLE": 1},
             "inputs": {"VALUE": 2}
         },
         "显示变量": {
             "opcode": "data_showvariable",
-            "pattern": r"显示变量\s+(.+?)(?:\s|$)",
+            "pattern": r"显示变量\s+(.+?)(?:\s|$)|show variable\s+(.+?)(?:\s|$)",
             "fields": {"VARIABLE": 1}
         },
         "隐藏变量": {
             "opcode": "data_hidevariable",
-            "pattern": r"隐藏变量\s+(.+?)(?:\s|$)",
+            "pattern": r"隐藏变量\s+(.+?)(?:\s|$)|hide variable\s+(.+?)(?:\s|$)",
             "fields": {"VARIABLE": 1}
         },
         "添加到列表": {
             "opcode": "data_addtolist",
-            "pattern": r"添加\s+(.+?)\s*到\s+(.+?)(?:\s|$)",
+            "pattern": r"添加\s+(.+?)\s*到\s+(.+?)(?:\s|$)|add\s+(.+?)\s+to\s+(.+?)(?:\s|$)",
             "inputs": {"ITEM": 1},
             "fields": {"LIST": 2}
         },
         "删除列表项": {
             "opcode": "data_deleteoflist",
-            "pattern": r"删除\s+(.+?)\s*的第\s+(.+?)\s*项(?:\s|$)",
+            "pattern": r"删除\s+(.+?)\s*的第\s+(.+?)\s*项(?:\s|$)|delete\s+(.+?)\s+of\s+(.+?)(?:\s|$)",
             "fields": {"LIST": 1},
             "inputs": {"INDEX": 2}
         },
         "清空列表": {
             "opcode": "data_deletealloflist",
-            "pattern": r"清空\s+(.+?)(?:\s|$)",
+            "pattern": r"清空\s+(.+?)(?:\s|$)|delete all of\s+(.+?)(?:\s|$)",
             "fields": {"LIST": 1}
         },
         "插入列表": {
@@ -473,7 +485,41 @@ class BlockDefinitions:
             "inputs": {"VALUE": 1}
         },
     }
-    
+
+    # ==================== 音乐扩展积木 ====================
+    MUSIC = {
+        "演奏鼓声": {
+            "opcode": "music_playDrumForBeats",
+            "pattern": r"演奏鼓声\s+(\d+)\s+(\S+)\s*拍",
+            "inputs": {"DRUM": 1, "BEATS": 2}
+        },
+        "休止": {
+            "opcode": "music_restForBeats",
+            "pattern": r"休止\s+(\S+)\s*拍",
+            "inputs": {"BEATS": 1}
+        },
+        "演奏音符": {
+            "opcode": "music_playNoteForBeats",
+            "pattern": r"演奏音符\s+(\d+)\s+(\S+)\s*拍",
+            "inputs": {"NOTE": 1, "BEATS": 2}
+        },
+        "设置乐器": {
+            "opcode": "music_setInstrument",
+            "pattern": r"将乐器设为\s+(\d+)",
+            "inputs": {"INSTRUMENT": 1}
+        },
+        "设置节奏": {
+            "opcode": "music_setTempo",
+            "pattern": r"将节奏设为\s+(\d+)",
+            "inputs": {"TEMPO": 1}
+        },
+        "节奏增加": {
+            "opcode": "music_changeTempo",
+            "pattern": r"将节奏增加\s+([-\d]+)",
+            "inputs": {"TEMPO": 1}
+        },
+    }
+
     @classmethod
     def get_all_blocks(cls) -> BlocksDict:
         """获取所有积木定义
@@ -491,4 +537,5 @@ class BlockDefinitions:
             **cls.OPERATORS,
             **cls.VARIABLES,
             **cls.PEN,
+            **cls.MUSIC,
         }

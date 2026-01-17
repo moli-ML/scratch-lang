@@ -127,31 +127,76 @@ class AssetManager:
         if not validate_image_format(filepath, data):
             raise ValueError(f"图片文件格式无效或已损坏: {filepath}")
 
+        rotation_center = None
         if ext == '.svg':
             final_data = data
             format_ext = 'svg'
+            # 解析 SVG 尺寸计算 rotationCenter
+            rotation_center = self._get_svg_rotation_center(data)
         else:
             # 使用PIL转换
             try:
                 img = Image.open(io.BytesIO(data))
+                # 计算 rotationCenter（图片中心）
+                rotation_center = (img.width // 2, img.height // 2)
                 output = io.BytesIO()
                 img.save(output, format='PNG')
                 final_data = output.getvalue()
                 format_ext = 'png'
             except Exception as e:
                 raise ValueError(f"无法处理图片文件: {filepath}，错误: {e}")
-        
+
         md5 = hashlib.md5(final_data).hexdigest()
         filename = f"{md5}.{format_ext}"
-        
+
         self.assets[filename] = final_data
-        
-        return {
+
+        result = {
             "assetId": md5,
             "name": os.path.basename(filepath),
             "md5ext": filename,
             "dataFormat": format_ext
         }
+
+        if rotation_center:
+            result["rotationCenterX"] = rotation_center[0]
+            result["rotationCenterY"] = rotation_center[1]
+
+        return result
+
+    def _get_svg_rotation_center(self, data: bytes) -> tuple:
+        """从 SVG 数据中解析尺寸并计算 rotationCenter
+
+        Args:
+            data: SVG 文件数据
+
+        Returns:
+            tuple: (centerX, centerY)
+        """
+        import re
+        try:
+            text = data.decode('utf-8', errors='ignore')
+            # 尝试解析 width 和 height 属性
+            width_match = re.search(r'<svg[^>]*\swidth=["\']?(\d+(?:\.\d+)?)', text, re.IGNORECASE)
+            height_match = re.search(r'<svg[^>]*\sheight=["\']?(\d+(?:\.\d+)?)', text, re.IGNORECASE)
+
+            if width_match and height_match:
+                width = float(width_match.group(1))
+                height = float(height_match.group(1))
+                return (int(width / 2), int(height / 2))
+
+            # 尝试解析 viewBox 属性
+            viewbox_match = re.search(r'viewBox=["\']?\s*[\d.]+\s+[\d.]+\s+([\d.]+)\s+([\d.]+)', text, re.IGNORECASE)
+            if viewbox_match:
+                width = float(viewbox_match.group(1))
+                height = float(viewbox_match.group(2))
+                return (int(width / 2), int(height / 2))
+
+        except Exception:
+            pass
+
+        # 默认值
+        return (50, 50)
     
     def add_sound(self, filepath: str) -> Dict[str, Any]:
         """添加音效资源

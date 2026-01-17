@@ -42,6 +42,19 @@ Desktop.ini
 *.sb3
 temp_compile*.sl
 output.sb3
+output/
+
+# Claude AI
+.claude/
+CLAUDE.md
+AGENTS.md
+
+# Temporary test files
+test_*.py
+test_*.sl
+check_*.py
+debug_*.py
+final_check.py
 
 # Logs
 *.log

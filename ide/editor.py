@@ -52,33 +52,51 @@ class CodeEditor(QPlainTextEdit):
 
     # 自动补全关键字列表
     KEYWORDS: List[str] = [
-        # 事件
+        # 事件 (中文)
         "当绿旗被点击", "当按下", "键", "当角色被点击", "当舞台被点击",
         "当收到", "当背景换成", "当作为克隆体启动",
-        # 动作
+        # 动作 (中文)
         "移动", "步", "旋转右", "旋转左", "度", "移到", "面向", "方向",
         "在", "秒内滑行到", "将x坐标增加", "将x坐标设为", "将y坐标增加", "将y坐标设为",
         "碰到边缘就反弹", "将旋转方式设为",
-        # 外观
+        # 外观 (中文)
         "说", "秒", "想", "切换造型到", "下一个造型", "切换背景到", "下一个背景",
         "将大小设为", "将大小增加", "显示", "隐藏", "移至最前层", "移至最后层",
         "图层增加", "图层减少", "清除图形特效",
-        # 声音
+        # 声音 (中文)
         "播放声音", "并等待", "停止所有声音", "将音量设为", "将音量增加",
-        # 控制
+        # 控制 (中文)
         "等待", "重复", "次", "重复执行", "如果", "那么", "否则", "结束",
         "等待直到", "重复执行直到", "停止", "全部", "此脚本", "克隆", "删除此克隆体",
-        "广播",
-        # 侦测
+        "广播", "定义", "不刷新屏幕",
+        # 侦测 (中文)
         "询问", "计时器归零", "设置拖动模式为",
-        # 变量
-        "变量:", "列表:", "设置", "为", "将", "增加", "显示变量", "隐藏变量",
+        # 变量 (中文)
+        "变量:", "列表:", "云变量:", "设置", "为", "将", "增加", "显示变量", "隐藏变量",
         "添加", "到", "删除", "的第", "项", "清空", "插入", "替换",
-        # 画笔
+        # 画笔 (中文)
         "清空", "图章", "落笔", "抬笔", "将笔的颜色设为", "将笔的粗细设为",
-        # 特殊
+        # 音乐 (中文)
+        "演奏音符", "演奏鼓声", "休止", "拍", "将乐器设为", "将节奏设为", "将节奏增加",
+        # 特殊 (中文)
         "造型:", "背景:", "音效:", "鼠标指针", "随机位置", "边缘", "舞台",
         "空格", "上", "下", "左", "右", "回车", "任意",
+        # 事件 (英文)
+        "when flag clicked", "when", "key pressed", "when this sprite clicked",
+        "when I receive", "when backdrop switches to", "when I start as a clone",
+        # 动作 (英文)
+        "move", "steps", "turn right", "turn left", "degrees", "go to", "point in direction",
+        "glide", "secs to", "change x by", "set x to", "change y by", "set y to",
+        "if on edge, bounce", "set rotation style",
+        # 外观 (英文)
+        "say", "think", "switch costume to", "next costume", "switch backdrop to",
+        "next backdrop", "set size to", "change size by", "show", "hide",
+        # 控制 (英文)
+        "wait", "seconds", "repeat", "forever", "if", "then", "else", "end",
+        "wait until", "repeat until", "stop", "all", "this script", "create clone of",
+        "delete this clone", "broadcast", "and wait", "define", "warp",
+        # 变量 (英文)
+        "var:", "list:", "cloud:", "set", "to", "change", "by",
     ]
 
     # 语法错误信号
