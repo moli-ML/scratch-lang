@@ -1,10 +1,10 @@
 # ScratchLang - 为键盘侠打造的 Scratch!
 
 <p align="center">
-  <img src="https://img.shields.io/badge/版本-v1.2-blue.svg" alt="版本">
+  <img src="https://img.shields.io/badge/版本-v1.3-blue.svg" alt="版本">
   <img src="https://img.shields.io/badge/Python-3.7+-green.svg" alt="Python">
   <img src="https://img.shields.io/badge/许可证-MIT-orange.svg" alt="许可证">
-  <img src="https://img.shields.io/badge/完成度-79%25-brightgreen.svg" alt="完成度">
+  <img src="https://img.shields.io/badge/完成度-85%25-brightgreen.svg" alt="完成度">
 </p>
 
 ---
@@ -17,12 +17,28 @@
 
 *   **文本化编程**：告别鼠标，拥抱键盘，享受纯粹的编码快感。
 *   **100% 积木兼容**：支持所有 Scratch 3.0 的积木，从动作、外观到变量、画笔，应有尽有。
-*   **资源管理大师**：轻松导入图片作为造型 (`造型:`) 或背景 (`背景:`)，支持 PNG, JPG, SVG。
+*   **智能表达式解析**：支持复杂数学表达式，自动处理运算符优先级和括号嵌套。
+*   **资源管理大师**：轻松导入图片作为造型 (`造型:`) 或背景 (`背景:`)，支持 PNG, JPG, SVG，可自动按比例缩放。
 *   **音效指挥家**：导入 MP3 或 WAV 文件 (`音效:`)，为你的项目配上动感音乐。
 *   **自带炫酷 IDE**：内置基于 Qt5 的代码编辑器，拥有语法高亮、自动补全、实时语法检查和一键编译功能。
+*   **急救编译器**：IDE 未响应？使用独立的急救编译器工具直接编译 .sl 文件。
+*   **开箱即用**：提供打包好的可执行文件，无需 Python 环境即可运行。
 *   **跨平台运行**：只要有 Python 环境，无论 Windows, macOS 还是 Linux，都能流畅运行。
 
-## v1.2 更新内容
+## v1.3 更新内容
+
+| 类别 | 新增功能 |
+|------|----------|
+| **表达式解析** | AST 表达式解析器，支持复杂表达式、括号嵌套、运算符优先级 |
+| **Bug 修复** | 修复内联代码块 (#code#) 在事件块后断链的问题 |
+| **资源管理** | 造型自动按比例缩放功能（可配置开关和最大尺寸） |
+| **工具** | 急救编译器 (ScratchLang-Emergency.exe)，IDE 未响应时可用 |
+| **打包** | 提供可执行文件 (ScratchLang.exe)，无需 Python 环境 |
+
+### 历史版本
+
+<details>
+<summary>v1.2 更新内容</summary>
 
 | 类别 | 新增功能 |
 |------|----------|
@@ -30,7 +46,7 @@
 | **代码质量** | 魔法字符串提取到 `constants.py`、文件格式验证 (魔数检测) |
 | **安全** | 文件内容验证、异常处理改进 |
 
-### 历史版本
+</details>
 
 <details>
 <summary>v1.1 更新内容</summary>
@@ -45,6 +61,23 @@
 </details>
 
 ## 安装与运行
+
+### 方式一：使用可执行文件（推荐，无需 Python）
+
+**Windows 用户**可以直接下载打包好的可执行文件：
+
+1. 从 [Releases](https://github.com/moli-ML/scratch-lang/releases) 下载最新版本
+2. 解压后运行：
+   - `ScratchLang.exe` - 完整 IDE（带图形界面）
+   - `ScratchLang-Emergency.exe` - 急救编译器（命令行工具，IDE 未响应时使用）
+
+**急救编译器使用方法：**
+- 双击运行 `ScratchLang-Emergency.exe`
+- 输入 `.sl` 文件路径
+- 输入 `.sb3` 输出路径（可留空自动生成）
+- 自动编译完成
+
+### 方式二：从源码运行
 
 **环境要求**: Python 3.7+
 
@@ -159,23 +192,32 @@ pytest tests/ -v
 
 ```
 scratch-lang/
-├── main.py                 # 程序入口
-├── compiler/               # 编译器核心
-│   ├── parser.py           # 语法解析器
-│   ├── builder.py          # SB3 构建器
-│   ├── blocks.py           # 积木定义
-│   ├── assets.py           # 资源管理
-│   ├── constants.py        # 常量定义
-│   └── exceptions.py       # 自定义异常
-├── ide/                    # IDE 界面
-│   ├── mainwindow.py       # 主窗口
-│   ├── editor.py           # 代码编辑器
-│   └── highlighter.py      # 语法高亮
-├── tests/                  # 单元测试
-├── docs/                   # 文档
-│   └── SYNTAX.md           # 语法参考
-└── examples/               # 示例代码
-    └── demo.sl
+├── main.py                      # 程序入口
+├── emergency_compile.py         # 急救编译器
+├── compiler/                    # 编译器核心
+│   ├── parser.py                # 语法解析器
+│   ├── builder.py               # SB3 构建器
+│   ├── blocks.py                # 积木定义
+│   ├── assets.py                # 资源管理
+│   ├── constants.py             # 常量定义
+│   ├── exceptions.py            # 自定义异常
+│   ├── lexer.py                 # 词法分析器
+│   ├── expression_parser.py     # 表达式解析器
+│   ├── ast_nodes.py             # AST 节点定义
+│   └── ast_to_scratch.py        # AST 到 Scratch 转换器
+├── ide/                         # IDE 界面
+│   ├── mainwindow.py            # 主窗口
+│   ├── editor.py                # 代码编辑器
+│   └── highlighter.py           # 语法高亮
+├── tests/                       # 单元测试
+├── docs/                        # 文档
+│   └── SYNTAX.md                # 语法参考
+├── examples/                    # 示例代码
+│   └── demo.sl
+├── dist/                        # 打包输出
+│   ├── ScratchLang.exe          # IDE 可执行文件
+│   └── ScratchLang-Emergency.exe # 急救编译器
+└── .mailmap                     # Git 贡献者映射
 ```
 
 ## 开发进度
@@ -183,20 +225,23 @@ scratch-lang/
 | 类别 | 完成率 |
 |------|--------|
 | 工程化 | 100% |
-| 代码质量 | 82% |
+| 代码质量 | 90% |
 | IDE 功能 | 100% |
-| 功能完整性 | 22% |
+| 表达式解析 | 100% |
+| 功能完整性 | 30% |
 | 安全 | 100% |
 | Bug 修复 | 100% |
-| **总计** | **79%** |
+| **总计** | **85%** |
 
 > 详细进度请查看 [ISSUES.md](ISSUES.md)
 
 ## 待实现功能
 
-- [ ] 自定义积木 (自制积木) 支持
-- [ ] 扩展积木支持 (音乐、视频侦测等)
-- [ ] 云变量支持
+- [x] ~~复杂表达式支持~~ (v1.3 已完成)
+- [x] ~~内联代码块支持~~ (v1.3 已完成)
+- [ ] 自定义积木 (自制积木) 完善
+- [ ] 更多扩展积木支持 (音乐、视频侦测等)
+- [ ] 云变量完善
 - [ ] 多行字符串支持
 - [ ] 块注释 `/* */` 支持
 
@@ -213,6 +258,15 @@ A: 图片支持 PNG、JPG、SVG (最大 10MB)，音频支持 MP3、WAV (最大 2
 
 **Q: 实时语法检查怎么用？**
 A: 输入代码后 500ms 自动检查，错误会以红色下划线标记，详细信息显示在输出窗口。
+
+**Q: IDE 未响应怎么办？**
+A: 使用急救编译器 `ScratchLang-Emergency.exe`，它是独立的命令行工具，可以直接编译 .sl 文件。
+
+**Q: 如何启用造型自动缩放？**
+A: 在代码中使用 `ScratchLangParser(auto_scale_costumes=True, max_costume_size=480)`，或等待后续版本的 IDE 配置选项。
+
+**Q: 复杂表达式怎么写？**
+A: 支持括号和运算符优先级，例如：`设置 ~结果 为 (~分数 + 10) * 2`，会自动解析为正确的积木嵌套。
 
 ## 贡献指南
 
