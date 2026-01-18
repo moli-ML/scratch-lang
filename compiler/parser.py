@@ -13,6 +13,9 @@ from .constants import (
     ROTATION_STYLES, STOP_OPTIONS, DRAG_MODES
 )
 from .extensions import extension_manager
+from .lexer import Lexer
+from .expression_parser import ExpressionParser
+from .ast_to_scratch import ASTToScratch
 
 class ScratchLangParser:
     def __init__(self, security_enabled=True):
@@ -21,6 +24,9 @@ class ScratchLangParser:
         self.has_stage = False
         self.current_dir = os.getcwd()
         self.security_enabled = security_enabled
+
+        # 表达式解析器
+        self.ast_converter = ASTToScratch(self.builder)
 
         # 使用常量模块中的映射
         self.SPECIAL_TARGETS = SPECIAL_TARGETS
@@ -903,10 +909,63 @@ class ScratchLangParser:
         
         return self._parse_variable_or_reporter(content)
     
+    def _is_complex_expression(self, text):
+        """判断是否为复杂表达式（需要使用新解析器）"""
+        text = text.strip()
+
+        # 简单值：直接返回False
+        # 纯数字
+        try:
+            float(text)
+            return False
+        except ValueError:
+            pass
+
+        # 纯字符串
+        if (text.startswith('"') and text.endswith('"')) or (text.startswith("'") and text.endswith("'")):
+            return False
+
+        # 单个变量引用（没有运算符）
+        if text.startswith('~') and not any(op in text[1:] for op in ['+', '-', '*', '/', '>', '<', '=', '且', '或', '(', ')']):
+            return False
+
+        # 包含括号 -> 复杂表达式
+        if '(' in text or ')' in text:
+            return True
+
+        # 包含变量引用和运算符 -> 复杂表达式
+        if '~' in text and any(op in text for op in ['+', '-', '*', '/', '>', '<', '=', '且', '或']):
+            return True
+
+        # 包含多个运算符 -> 复杂表达式
+        op_count = sum(text.count(op) for op in ['+', '-', '*', '/', '>', '<', '=', '且', '或'])
+        if op_count >= 2:
+            return True
+
+        # 包含乘除运算符 -> 可能需要处理优先级
+        if '*' in text or '/' in text or '%' in text:
+            return True
+
+        return False
+
     def _parse_value(self, text):
         """解析值"""
         text = text.strip()
-        
+
+        # 检测是否为复杂表达式
+        if self._is_complex_expression(text):
+            try:
+                # 使用新的表达式解析器
+                lexer = Lexer(text)
+                tokens = lexer.tokenize()
+                parser = ExpressionParser(tokens)
+                ast = parser.parse()
+                block_type, block_value = self.ast_converter.convert(ast)
+                return [block_type, block_value]
+            except Exception as e:
+                # 降级到旧逻辑
+                pass
+
         # 1. 逻辑运算符
         if ' 或 ' in text:
             parts = text.split(' 或 ', 1)

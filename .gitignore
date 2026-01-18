@@ -55,6 +55,7 @@ test_*.sl
 check_*.py
 debug_*.py
 final_check.py
+texts_to/
 
 # Logs
 *.log

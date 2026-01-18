@@ -3,7 +3,7 @@
 """
 import re
 from typing import TYPE_CHECKING, List, Tuple, Dict, Set
-from PyQt5.QtWidgets import QPlainTextEdit, QWidget, QCompleter, QAbstractItemView
+from PyQt5.QtWidgets import QPlainTextEdit, QWidget, QCompleter, QAbstractItemView, QTextEdit
 from PyQt5.QtCore import Qt, QRect, QSize, QStringListModel, QTimer, pyqtSignal
 from PyQt5.QtGui import (QColor, QPainter, QTextFormat, QFont, QPaintEvent,
                          QResizeEvent, QTextCursor, QTextCharFormat, QMouseEvent,
@@ -277,7 +277,7 @@ class CodeEditor(QPlainTextEdit):
         for line_num in error_lines:
             block = self.document().findBlockByLineNumber(line_num - 1)
             if block.isValid():
-                selection = QPlainTextEdit.ExtraSelection()
+                selection = QTextEdit.ExtraSelection()
                 selection.format.setBackground(QColor("#FFEEEE"))
                 selection.format.setProperty(QTextFormat.FullWidthSelection, True)
                 selection.cursor = QTextCursor(block)
