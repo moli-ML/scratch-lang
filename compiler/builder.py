@@ -22,7 +22,7 @@ class SB3Builder:
     积木、变量、列表、造型、音效等。
     """
 
-    def __init__(self) -> None:
+    def __init__(self, auto_scale_costumes: bool = False, max_costume_size: int = 480) -> None:
         self.project = {
             "targets": [],
             "monitors": [],
@@ -34,7 +34,7 @@ class SB3Builder:
                 "agent": "ScratchLang Compiler v1.0"
             }
         }
-        self.asset_manager = AssetManager()
+        self.asset_manager = AssetManager(auto_scale_costumes, max_costume_size)
         self.current_sprite = None
         self.stage = None
         self.variables = {}

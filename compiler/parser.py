@@ -18,8 +18,8 @@ from .expression_parser import ExpressionParser
 from .ast_to_scratch import ASTToScratch
 
 class ScratchLangParser:
-    def __init__(self, security_enabled=True):
-        self.builder = SB3Builder()
+    def __init__(self, security_enabled=True, auto_scale_costumes=False, max_costume_size=480):
+        self.builder = SB3Builder(auto_scale_costumes, max_costume_size)
         self.blocks_def = BlockDefinitions.get_all_blocks()
         self.has_stage = False
         self.current_dir = os.getcwd()
@@ -339,6 +339,10 @@ class ScratchLangParser:
             block["y"] = 50
 
         self.builder.current_sprite["blocks"][block_id] = block
+
+        if parent:
+            self.builder.current_sprite["blocks"][parent]["next"] = block_id
+
         return block_id
 
     def handle_keyword(self, keyword, value):

@@ -91,8 +91,10 @@ class AssetManager:
     管理 Scratch 项目中的图片和音效资源。
     """
 
-    def __init__(self) -> None:
+    def __init__(self, auto_scale_costumes: bool = False, max_costume_size: int = 480) -> None:
         self.assets: Dict[str, bytes] = {}
+        self.auto_scale_costumes = auto_scale_costumes
+        self.max_costume_size = max_costume_size
         
     def add_image(self, filepath: str) -> Dict[str, Any]:
         """添加图片资源
@@ -137,6 +139,16 @@ class AssetManager:
             # 使用PIL转换
             try:
                 img = Image.open(io.BytesIO(data))
+
+                # 自动缩放
+                if self.auto_scale_costumes:
+                    max_dim = max(img.width, img.height)
+                    if max_dim > self.max_costume_size:
+                        scale = self.max_costume_size / max_dim
+                        new_width = int(img.width * scale)
+                        new_height = int(img.height * scale)
+                        img = img.resize((new_width, new_height), Image.LANCZOS)
+
                 # 计算 rotationCenter（图片中心）
                 rotation_center = (img.width // 2, img.height // 2)
                 output = io.BytesIO()
