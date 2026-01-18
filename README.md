@@ -4,7 +4,7 @@
   <img src="https://img.shields.io/badge/版本-v1.3-blue.svg" alt="版本">
   <img src="https://img.shields.io/badge/Python-3.7+-green.svg" alt="Python">
   <img src="https://img.shields.io/badge/许可证-MIT-orange.svg" alt="许可证">
-  <img src="https://img.shields.io/badge/完成度-85%25-brightgreen.svg" alt="完成度">
+  <img src="https://img.shields.io/badge/完成度-95%25-brightgreen.svg" alt="完成度">
 </p>
 
 ---
@@ -225,13 +225,14 @@ scratch-lang/
 | 类别 | 完成率 |
 |------|--------|
 | 工程化 | 100% |
-| 代码质量 | 90% |
+| 代码质量 | 73% |
 | IDE 功能 | 100% |
 | 表达式解析 | 100% |
-| 功能完整性 | 30% |
+| 功能完整性 | 100% |
+| 文档 | 83% |
 | 安全 | 100% |
 | Bug 修复 | 100% |
-| **总计** | **85%** |
+| **总计** | **95%** |
 
 > 详细进度请查看 [ISSUES.md](ISSUES.md)
 
