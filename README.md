@@ -16,6 +16,7 @@
 ## 核心特性
 
 *   **文本化编程**：告别鼠标，拥抱键盘，享受纯粹的编码快感。
+*   **双向转换**：支持 ScratchLang → Scratch 编译，也支持 Scratch → ScratchLang 反编译。
 *   **100% 积木兼容**：支持所有 Scratch 3.0 的积木，从动作、外观到变量、画笔，应有尽有。
 *   **智能表达式解析**：支持复杂数学表达式，自动处理运算符优先级和括号嵌套。
 *   **资源管理大师**：轻松导入图片作为造型 (`造型:`) 或背景 (`背景:`)，支持 PNG, JPG, SVG，可自动按比例缩放。
@@ -30,6 +31,7 @@
 | 类别 | 新增功能 |
 |------|----------|
 | **表达式解析** | AST 表达式解析器，支持复杂表达式、括号嵌套、运算符优先级 |
+| **反编译器** | Scratch → ScratchLang 反编译器，支持将 .sb3 转换为 .sl |
 | **Bug 修复** | 修复内联代码块 (#code#) 在事件块后断链的问题 |
 | **资源管理** | 造型自动按比例缩放功能（可配置开关和最大尺寸） |
 | **工具** | 急救编译器 (ScratchLang-Emergency.exe)，IDE 未响应时可用 |
@@ -113,6 +115,12 @@ python main.py
 #### 4. 运行测试 (可选)
 ```bash
 pytest tests/ -v
+```
+
+#### 5. 反编译 Scratch 项目 (可选)
+```bash
+# 将 .sb3 文件转换为 .sl 文件
+python compiler/decompiler.py input.sb3 -o output.sl
 ```
 
 ## 快速上手：画一个正方形
@@ -268,6 +276,9 @@ A: 在代码中使用 `ScratchLangParser(auto_scale_costumes=True, max_costume_s
 
 **Q: 复杂表达式怎么写？**
 A: 支持括号和运算符优先级，例如：`设置 ~结果 为 (~分数 + 10) * 2`，会自动解析为正确的积木嵌套。
+
+**Q: 如何将现有的 Scratch 项目转换为 ScratchLang？**
+A: 使用反编译器：`python compiler/decompiler.py project.sb3 -o project.sl`，会自动将 .sb3 文件转换为 .sl 文件。
 
 ## 贡献指南
 
