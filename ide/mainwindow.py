@@ -22,6 +22,8 @@ class MainWindow(QMainWindow):
         self.current_file = None
         self.recent_files = []
         self.security_enabled = True
+        self.auto_scale_costumes = False
+        self.max_costume_size = 480
         self.settings = QSettings("ScratchLang", "IDE")
         self.load_settings()
         self.init_ui()
@@ -191,12 +193,19 @@ class MainWindow(QMainWindow):
         
         # 编译菜单
         build_menu = menubar.addMenu("编译(&B)")
-        
+
         compile_action = QAction("快速编译(&C)", self)
         compile_action.setShortcut("F5")
         compile_action.triggered.connect(self.compile_project)
         build_menu.addAction(compile_action)
-        
+
+        build_menu.addSeparator()
+
+        decompile_action = QAction("反编译 Scratch 项目(&D)", self)
+        decompile_action.setShortcut("F6")
+        decompile_action.triggered.connect(self.decompile_sb3)
+        build_menu.addAction(decompile_action)
+
         # 帮助菜单
         help_menu = menubar.addMenu("帮助(&H)")
         
@@ -229,6 +238,12 @@ class MainWindow(QMainWindow):
         self.security_action.setCheckable(True)
         self.security_action.triggered.connect(self.toggle_security)
         view_menu.addAction(self.security_action)
+
+        view_menu.addSeparator()
+
+        settings_action = QAction("编译器设置(&S)", self)
+        settings_action.triggered.connect(self.show_settings_dialog)
+        view_menu.addAction(settings_action)
 
         # 加载主题设置
         is_dark = self.settings.value("dark_theme", False, type=bool)
@@ -403,7 +418,11 @@ class MainWindow(QMainWindow):
             self.output.append("🔍 解析代码...")
             QApplication.processEvents()
 
-            parser = ScratchLangParser(security_enabled=self.security_enabled)
+            parser = ScratchLangParser(
+                security_enabled=self.security_enabled,
+                auto_scale_costumes=self.auto_scale_costumes,
+                max_costume_size=self.max_costume_size
+            )
             parser.parse_file(temp_file)
             
             self.output.append("✅ 解析完成")
@@ -482,7 +501,106 @@ class MainWindow(QMainWindow):
         finally:
             if temp_file and os.path.exists(temp_file):
                 os.remove(temp_file)
-    
+
+    def decompile_sb3(self):
+        """反编译 Scratch 项目"""
+        self.output.clear()
+        self.output.append("🔄 准备反编译...")
+        QApplication.processEvents()
+
+        # 选择 sb3 文件
+        sb3_file, _ = QFileDialog.getOpenFileName(
+            self, "选择 Scratch 项目", "",
+            "Scratch 3.0 (*.sb3);;All Files (*)"
+        )
+
+        if not sb3_file:
+            self.output.append("⚠️ 用户取消")
+            return
+
+        try:
+            from compiler.decompiler import SB3Decompiler
+
+            self.output.append(f"📂 读取文件: {os.path.basename(sb3_file)}")
+            QApplication.processEvents()
+
+            decompiler = SB3Decompiler()
+            sl_code = decompiler.decompile(sb3_file)
+
+            # 将代码显示在编辑器中
+            self.editor.setPlainText(sl_code)
+
+            self.output.append("")
+            self.output.append("="*50)
+            self.output.append("✅ 反编译成功!")
+            self.output.append(f"📁 源文件: {os.path.basename(sb3_file)}")
+            self.output.append("="*50)
+
+            self.statusBar().showMessage("反编译成功！", 5000)
+
+        except Exception as e:
+            self.output.append(f"\n❌ 错误: {str(e)}")
+            QMessageBox.critical(self, "错误", f"反编译失败:\n{str(e)}")
+            import traceback
+            traceback.print_exc()
+
+    def show_settings_dialog(self):
+        """显示设置对话框"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("编译器设置")
+        dialog.setMinimumWidth(400)
+
+        layout = QVBoxLayout()
+
+        # 图片缩放设置
+        scale_group = QWidget()
+        scale_layout = QVBoxLayout()
+
+        self.scale_checkbox = QCheckBox("启用造型自动缩放")
+        self.scale_checkbox.setChecked(self.auto_scale_costumes)
+        scale_layout.addWidget(self.scale_checkbox)
+
+        size_layout = QHBoxLayout()
+        size_layout.addWidget(QLabel("最大尺寸:"))
+        self.size_input = QLineEdit(str(self.max_costume_size))
+        self.size_input.setMaximumWidth(100)
+        size_layout.addWidget(self.size_input)
+        size_layout.addWidget(QLabel("像素"))
+        size_layout.addStretch()
+        scale_layout.addLayout(size_layout)
+
+        scale_group.setLayout(scale_layout)
+        layout.addWidget(scale_group)
+
+        # 按钮
+        button_layout = QHBoxLayout()
+        ok_button = QPushButton("确定")
+        ok_button.clicked.connect(lambda: self.save_settings(dialog))
+        cancel_button = QPushButton("取消")
+        cancel_button.clicked.connect(dialog.reject)
+        button_layout.addStretch()
+        button_layout.addWidget(ok_button)
+        button_layout.addWidget(cancel_button)
+        layout.addLayout(button_layout)
+
+        dialog.setLayout(layout)
+        dialog.exec_()
+
+    def save_settings(self, dialog):
+        """保存设置"""
+        self.auto_scale_costumes = self.scale_checkbox.isChecked()
+        try:
+            self.max_costume_size = int(self.size_input.text())
+        except ValueError:
+            QMessageBox.warning(self, "警告", "最大尺寸必须是数字")
+            return
+
+        self.settings.setValue("auto_scale_costumes", self.auto_scale_costumes)
+        self.settings.setValue("max_costume_size", self.max_costume_size)
+
+        dialog.accept()
+        QMessageBox.information(self, "设置", "设置已保存！")
+
     def insert_costume(self):
         """插入造型"""
         filename, _ = QFileDialog.getOpenFileName(
@@ -671,6 +789,8 @@ Copyright © 2024
         """加载设置"""
         self.recent_files = self.settings.value("recent_files", []) or []
         self.security_enabled = self.settings.value("security_enabled", True, type=bool)
+        self.auto_scale_costumes = self.settings.value("auto_scale_costumes", False, type=bool)
+        self.max_costume_size = self.settings.value("max_costume_size", 480, type=int)
 
     def save_settings(self):
         """保存设置"""
