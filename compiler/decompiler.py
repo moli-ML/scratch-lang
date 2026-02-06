@@ -9,6 +9,14 @@ import zipfile
 import os
 from typing import Dict, List, Any, Optional
 
+try:
+    from .exceptions import ParseError, CompileError
+except ImportError:
+    # 当作为脚本直接运行时
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from compiler.exceptions import ParseError, CompileError
+
 class SB3Decompiler:
     """Scratch 3.0 项目反编译器"""
 
@@ -21,9 +29,25 @@ class SB3Decompiler:
         if not os.path.exists(filepath):
             raise FileNotFoundError(f"文件不存在: {filepath}")
 
-        with zipfile.ZipFile(filepath, 'r') as zf:
-            project_json = zf.read('project.json').decode('utf-8')
-            self.project = json.loads(project_json)
+        if not filepath.lower().endswith('.sb3'):
+            raise ParseError(f"文件格式错误，必须是 .sb3 文件: {filepath}")
+
+        try:
+            with zipfile.ZipFile(filepath, 'r') as zf:
+                if 'project.json' not in zf.namelist():
+                    raise ParseError(f"无效的 .sb3 文件，缺少 project.json: {filepath}")
+
+                project_json = zf.read('project.json').decode('utf-8')
+                self.project = json.loads(project_json)
+        except zipfile.BadZipFile:
+            raise ParseError(f"无效的 ZIP 文件: {filepath}")
+        except json.JSONDecodeError as e:
+            raise ParseError(f"project.json 格式错误: {e}")
+        except ParseError:
+            # 重新抛出 ParseError
+            raise
+        except Exception as e:
+            raise CompileError(f"加载 .sb3 文件时发生错误: {e}")
 
         return self.project
 
@@ -85,13 +109,29 @@ class SB3Decompiler:
             sound_name = sound.get('name', '')
             self.sl_code.append(f"// 音效: {sound_name}")
 
+        # 处理自定义积木定义
+        blocks = target.get('blocks', {})
+        self._process_custom_blocks(blocks)
+
         self.sl_code.append("")
 
         # 处理脚本
-        blocks = target.get('blocks', {})
         self._process_scripts(blocks)
 
         self.sl_code.append("")
+
+    def _process_custom_blocks(self, blocks: Dict[str, Any]):
+        """处理自定义积木定义"""
+        for block_id, block in blocks.items():
+            if isinstance(block, dict) and block.get('opcode') == 'procedures_definition':
+                # 获取自定义积木的原型
+                prototype_id = block.get('inputs', {}).get('custom_block', [None, None])[1]
+                if prototype_id:
+                    prototype = blocks.get(prototype_id)
+                    if prototype:
+                        proccode = prototype.get('mutation', {}).get('proccode', '')
+                        if proccode:
+                            self.sl_code.append(f"// 自定义积木定义: {proccode}")
 
     def _process_scripts(self, blocks: Dict[str, Any]):
         """处理所有脚本"""
@@ -323,6 +363,16 @@ class SB3Decompiler:
             return f"克隆 {clone_option}"
         elif opcode == 'control_delete_this_clone':
             return "删除此克隆体"
+        elif opcode == 'control_start_as_clone':
+            return "当作为克隆体启动时"
+
+        # 事件块 - 添加广播支持
+        elif opcode == 'event_broadcast':
+            broadcast_input = self._get_input_value(blocks, block, 'BROADCAST_INPUT')
+            return f"广播 {broadcast_input}"
+        elif opcode == 'event_broadcastandwait':
+            broadcast_input = self._get_input_value(blocks, block, 'BROADCAST_INPUT')
+            return f"广播 {broadcast_input} 并等待"
 
         # 侦测块
         elif opcode == 'sensing_touchingobject':
@@ -429,6 +479,49 @@ class SB3Decompiler:
             tempo = self._get_input_value(blocks, block, 'TEMPO')
             return f"将节奏增加 {tempo}"
 
+        # 自定义积木
+        elif opcode == 'procedures_call':
+            mutation = block.get('mutation', {})
+            proccode = mutation.get('proccode', '')
+            if proccode:
+                # 处理自定义积木的参数
+                argumentids = mutation.get('argumentids', '[]')
+                if argumentids != '[]':
+                    try:
+                        import json
+                        arg_ids = json.loads(argumentids)
+                        args = []
+                        for arg_id in arg_ids:
+                            arg_value = self._get_input_value(blocks, block, arg_id)
+                            args.append(arg_value)
+                        return f"{proccode} {' '.join(args)}"
+                    except:
+                        pass
+                return proccode
+            return f"// 自定义积木调用: {block_id}"
+
+        # 扩展积木 - 通用处理
+        elif '_' in opcode and not opcode.startswith(('event_', 'motion_', 'looks_', 'sound_', 'control_', 'sensing_', 'operator_', 'data_', 'pen_', 'music_')):
+            # 这可能是扩展积木
+            extension_name = opcode.split('_')[0]
+            block_name = '_'.join(opcode.split('_')[1:])
+
+            # 尝试获取所有输入参数
+            inputs = block.get('inputs', {})
+            fields = block.get('fields', {})
+
+            params = []
+            for input_name, input_data in inputs.items():
+                value = self._get_input_value(blocks, block, input_name)
+                params.append(value)
+
+            for field_name, field_data in fields.items():
+                value = self._get_field_value(block, field_name)
+                params.append(value)
+
+            param_str = ' '.join(params) if params else ''
+            return f"// 扩展积木 [{extension_name}]: {block_name} {param_str}".strip()
+
         # 默认：显示 opcode
         else:
             return f"// 未支持的块: {opcode}"
@@ -451,16 +544,68 @@ class SB3Decompiler:
                 if isinstance(input_value, list) and len(input_value) >= 2:
                     value_type = input_value[0]
                     value = input_value[1]
-                    if value_type == 4:  # 数字
+                    if value_type == 4:  # 数字（整数）
+                        return str(value)
+                    elif value_type == 5:  # 数字（浮点数）
+                        return str(value)
+                    elif value_type == 6:  # 正整数
+                        return str(value)
+                    elif value_type == 7:  # 正数
+                        return str(value)
+                    elif value_type == 8:  # 整数
+                        return str(value)
+                    elif value_type == 9:  # 角度
                         return str(value)
                     elif value_type == 10:  # 字符串
                         return f'"{value}"'
+                    elif value_type == 11:  # 广播消息
+                        return f'"{value}"'
+                    elif value_type == 12:  # 变量
+                        return f"~{value}"
+                    elif value_type == 13:  # 列表
+                        return f"~{value}"
+                # 处理 input_type == 1 但 input_value 是字符串的情况（菜单块引用）
+                elif isinstance(input_value, str):
+                    ref_block = blocks.get(input_value)
+                    if ref_block:
+                        return self._convert_reporter_block(blocks, ref_block)
 
-            # 块引用
+            # 块引用 (input_type == 2 或 3)
+            elif input_type in [2, 3]:
+                if isinstance(input_value, str):
+                    ref_block = blocks.get(input_value)
+                    if ref_block:
+                        return self._convert_reporter_block(blocks, ref_block)
+                # 处理 input_type == 3 且 input_value 是列表的情况（变量引用）
+                elif isinstance(input_value, list) and len(input_value) >= 2:
+                    value_type = input_value[0]
+                    if value_type == 12:  # 变量引用
+                        var_name = input_value[1]
+                        return f"~{var_name}"
+                    elif value_type == 13:  # 列表引用
+                        list_name = input_value[1]
+                        return f"~{list_name}"
+
+            # 块引用 (直接字符串)
             elif isinstance(input_value, str):
                 ref_block = blocks.get(input_value)
                 if ref_block:
                     return self._convert_reporter_block(blocks, ref_block)
+
+            # 菜单选项 (shadow block)
+            elif isinstance(input_value, list) and len(input_value) >= 2:
+                shadow_type = input_value[0]
+                shadow_value = input_value[1]
+                if isinstance(shadow_value, str):
+                    shadow_block = blocks.get(shadow_value)
+                    if shadow_block:
+                        # 处理菜单块
+                        shadow_opcode = shadow_block.get('opcode', '')
+                        if shadow_opcode.endswith('_menu') or shadow_opcode.endswith('menu'):
+                            field_name = list(shadow_block.get('fields', {}).keys())
+                            if field_name:
+                                return self._get_field_value(shadow_block, field_name[0])
+                        return self._convert_reporter_block(blocks, shadow_block)
 
         return "?"
 
@@ -468,16 +613,194 @@ class SB3Decompiler:
         """转换报告块"""
         opcode = block.get('opcode', '')
 
+        # 变量和列表
         if opcode == 'data_variable':
             var_name = self._get_field_value(block, 'VARIABLE')
             return f"~{var_name}"
+        elif opcode == 'data_listcontents':
+            list_name = self._get_field_value(block, 'LIST')
+            return f"~{list_name}"
+        elif opcode == 'data_itemoflist':
+            index = self._get_input_value(blocks, block, 'INDEX')
+            list_name = self._get_field_value(block, 'LIST')
+            return f"~{list_name} 的第 {index} 项"
+        elif opcode == 'data_lengthoflist':
+            list_name = self._get_field_value(block, 'LIST')
+            return f"~{list_name} 的长度"
+        elif opcode == 'data_listcontainsitem':
+            list_name = self._get_field_value(block, 'LIST')
+            item = self._get_input_value(blocks, block, 'ITEM')
+            return f"~{list_name} 包含 {item}"
 
+        # 数学运算
         elif opcode == 'operator_add':
             num1 = self._get_input_value(blocks, block, 'NUM1')
             num2 = self._get_input_value(blocks, block, 'NUM2')
             return f"({num1} + {num2})"
+        elif opcode == 'operator_subtract':
+            num1 = self._get_input_value(blocks, block, 'NUM1')
+            num2 = self._get_input_value(blocks, block, 'NUM2')
+            return f"({num1} - {num2})"
+        elif opcode == 'operator_multiply':
+            num1 = self._get_input_value(blocks, block, 'NUM1')
+            num2 = self._get_input_value(blocks, block, 'NUM2')
+            return f"({num1} * {num2})"
+        elif opcode == 'operator_divide':
+            num1 = self._get_input_value(blocks, block, 'NUM1')
+            num2 = self._get_input_value(blocks, block, 'NUM2')
+            return f"({num1} / {num2})"
+        elif opcode == 'operator_random':
+            from_val = self._get_input_value(blocks, block, 'FROM')
+            to_val = self._get_input_value(blocks, block, 'TO')
+            return f"在 {from_val} 到 {to_val} 间取随机数"
+        elif opcode == 'operator_mod':
+            num1 = self._get_input_value(blocks, block, 'NUM1')
+            num2 = self._get_input_value(blocks, block, 'NUM2')
+            return f"({num1} mod {num2})"
+        elif opcode == 'operator_round':
+            num = self._get_input_value(blocks, block, 'NUM')
+            return f"四舍五入 {num}"
+        elif opcode == 'operator_mathop':
+            operator = self._get_field_value(block, 'OPERATOR')
+            num = self._get_input_value(blocks, block, 'NUM')
+            return f"{operator} {num}"
 
-        return "?"
+        # 比较运算
+        elif opcode == 'operator_gt':
+            operand1 = self._get_input_value(blocks, block, 'OPERAND1')
+            operand2 = self._get_input_value(blocks, block, 'OPERAND2')
+            return f"({operand1} > {operand2})"
+        elif opcode == 'operator_lt':
+            operand1 = self._get_input_value(blocks, block, 'OPERAND1')
+            operand2 = self._get_input_value(blocks, block, 'OPERAND2')
+            return f"({operand1} < {operand2})"
+        elif opcode == 'operator_equals':
+            operand1 = self._get_input_value(blocks, block, 'OPERAND1')
+            operand2 = self._get_input_value(blocks, block, 'OPERAND2')
+            return f"({operand1} = {operand2})"
+
+        # 逻辑运算
+        elif opcode == 'operator_and':
+            operand1 = self._get_input_value(blocks, block, 'OPERAND1')
+            operand2 = self._get_input_value(blocks, block, 'OPERAND2')
+            return f"({operand1} 且 {operand2})"
+        elif opcode == 'operator_or':
+            operand1 = self._get_input_value(blocks, block, 'OPERAND1')
+            operand2 = self._get_input_value(blocks, block, 'OPERAND2')
+            return f"({operand1} 或 {operand2})"
+        elif opcode == 'operator_not':
+            operand = self._get_input_value(blocks, block, 'OPERAND')
+            return f"(不是 {operand})"
+
+        # 字符串运算
+        elif opcode == 'operator_join':
+            string1 = self._get_input_value(blocks, block, 'STRING1')
+            string2 = self._get_input_value(blocks, block, 'STRING2')
+            return f"连接 {string1} 和 {string2}"
+        elif opcode == 'operator_letter_of':
+            letter = self._get_input_value(blocks, block, 'LETTER')
+            string = self._get_input_value(blocks, block, 'STRING')
+            return f"{string} 的第 {letter} 个字符"
+        elif opcode == 'operator_length':
+            string = self._get_input_value(blocks, block, 'STRING')
+            return f"{string} 的长度"
+        elif opcode == 'operator_contains':
+            string1 = self._get_input_value(blocks, block, 'STRING1')
+            string2 = self._get_input_value(blocks, block, 'STRING2')
+            return f"{string1} 包含 {string2}"
+
+        # 动作相关报告块
+        elif opcode == 'motion_xposition':
+            return "x坐标"
+        elif opcode == 'motion_yposition':
+            return "y坐标"
+        elif opcode == 'motion_direction':
+            return "方向"
+
+        # 外观相关报告块
+        elif opcode == 'looks_costumenumbername':
+            number_name = self._get_field_value(block, 'NUMBER_NAME')
+            return f"造型{number_name}"
+        elif opcode == 'looks_backdropnumbername':
+            number_name = self._get_field_value(block, 'NUMBER_NAME')
+            return f"背景{number_name}"
+        elif opcode == 'looks_size':
+            return "大小"
+
+        # 声音相关报告块
+        elif opcode == 'sound_volume':
+            return "音量"
+
+        # 侦测相关报告块
+        elif opcode == 'sensing_touchingobject':
+            touchingobjectmenu = self._get_input_value(blocks, block, 'TOUCHINGOBJECTMENU')
+            return f"碰到 {touchingobjectmenu}"
+        elif opcode == 'sensing_touchingcolor':
+            color = self._get_input_value(blocks, block, 'COLOR')
+            return f"碰到颜色 {color}"
+        elif opcode == 'sensing_coloristouchingcolor':
+            color = self._get_input_value(blocks, block, 'COLOR')
+            color2 = self._get_input_value(blocks, block, 'COLOR2')
+            return f"颜色 {color} 碰到 {color2}"
+        elif opcode == 'sensing_distanceto':
+            distancetomenu = self._get_input_value(blocks, block, 'DISTANCETOMENU')
+            return f"到 {distancetomenu} 的距离"
+        elif opcode == 'sensing_answer':
+            return "回答"
+        elif opcode == 'sensing_keypressed':
+            key_option = self._get_input_value(blocks, block, 'KEY_OPTION')
+            return f"按下 {key_option} 键"
+        elif opcode == 'sensing_mousedown':
+            return "鼠标被按下"
+        elif opcode == 'sensing_mousex':
+            return "鼠标的x坐标"
+        elif opcode == 'sensing_mousey':
+            return "鼠标的y坐标"
+        elif opcode == 'sensing_loudness':
+            return "响度"
+        elif opcode == 'sensing_timer':
+            return "计时器"
+        elif opcode == 'sensing_of':
+            property_val = self._get_field_value(block, 'PROPERTY')
+            object_val = self._get_input_value(blocks, block, 'OBJECT')
+            return f"{object_val} 的 {property_val}"
+        elif opcode == 'sensing_current':
+            currentmenu = self._get_field_value(block, 'CURRENTMENU')
+            return f"当前 {currentmenu}"
+        elif opcode == 'sensing_dayssince2000':
+            return "2000年至今的天数"
+        elif opcode == 'sensing_username':
+            return "用户名"
+
+        # 菜单块处理 - 改进版
+        elif opcode.endswith('_menu') or opcode.endswith('menu'):
+            # 获取菜单的第一个字段值
+            fields = block.get('fields', {})
+            if fields:
+                field_name = list(fields.keys())[0]
+                field_value = self._get_field_value(block, field_name)
+
+                # 处理特殊的菜单值
+                if field_value == "_myself_":
+                    return "自己"
+                elif field_value == "_stage_":
+                    return "舞台"
+                elif field_value == "_mouse_":
+                    return "鼠标指针"
+                elif field_value == "_edge_":
+                    return "边缘"
+                elif field_value == "_random_":
+                    return "随机位置"
+                elif field_value == "paddle":
+                    return "paddle"
+                elif field_value == "ball":
+                    return "ball"
+                elif field_value == "deathLine":
+                    return "deathLine"
+                else:
+                    return field_value
+
+        return f"[{opcode}]"
 
     def _get_field_value(self, block: Dict[str, Any], field_name: str) -> str:
         """获取字段值"""
@@ -497,8 +820,14 @@ if __name__ == "__main__":
         sys.exit(1)
 
     input_file = sys.argv[1]
-    output_file = sys.argv[3] if len(sys.argv) > 3 else input_file.replace('.sb3', '.sl')
+    output_file = input_file.replace('.sb3', '.sl')
+    if len(sys.argv) > 3 and sys.argv[2] == "-o":
+        output_file = sys.argv[3]
 
-    decompiler = SB3Decompiler()
-    decompiler.decompile(input_file, output_file)
-    print(f"✅ 反编译成功: {output_file}")
+    try:
+        decompiler = SB3Decompiler()
+        decompiler.decompile(input_file, output_file)
+        print(f"反编译成功: {output_file}")
+    except Exception as e:
+        print(f"反编译失败: {e}")
+        sys.exit(1)

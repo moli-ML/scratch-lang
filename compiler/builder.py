@@ -193,6 +193,15 @@ class SB3Builder:
         Returns:
             str: 变量 ID
         """
+        # 检查是否已存在同名变量
+        for var_id, var_data in self.current_sprite.get("variables", {}).items():
+            if var_data[0] == name:
+                return var_id
+        if self.stage and self.current_sprite != self.stage:
+            for var_id, var_data in self.stage.get("variables", {}).items():
+                if var_data[0] == name:
+                    return var_id
+
         var_id = self.generate_id()
         self.current_sprite["variables"][var_id] = [name, value]
         return var_id
@@ -316,12 +325,20 @@ Scratch.extensions.register(new {class_name}());"""
             "shadow": False,
             "topLevel": top_level
         }
-        
+
         if top_level:
             block["x"] = 50 + (len(self.current_sprite["blocks"]) % 3) * 300
             block["y"] = 50 + (len(self.current_sprite["blocks"]) // 3) * 200
-        
+
         self.current_sprite["blocks"][block_id] = block
+
+        # 自动设置输入块的 parent
+        for inp_name, inp_val in (inputs or {}).items():
+            if isinstance(inp_val, list) and len(inp_val) >= 2:
+                child_id = inp_val[1]
+                if isinstance(child_id, str) and child_id in self.current_sprite["blocks"]:
+                    self.current_sprite["blocks"][child_id]["parent"] = block_id
+
         return block_id
     
     def add_shadow_block(self, opcode: str, fields: Dict[str, Any]) -> str:

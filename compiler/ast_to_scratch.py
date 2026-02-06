@@ -8,6 +8,21 @@ class ASTToScratch:
 
     def __init__(self, builder):
         self.builder = builder
+        # 内置reporter块映射
+        self.builtin_reporters = {
+            "回答": "sensing_answer",
+            "x坐标": "motion_xposition",
+            "y坐标": "motion_yposition",
+            "方向": "motion_direction",
+            "计时器": "sensing_timer",
+            "响度": "sensing_loudness",
+            "鼠标x坐标": "sensing_mousex",
+            "鼠标y坐标": "sensing_mousey",
+            "鼠标的x坐标": "sensing_mousex",
+            "鼠标的y坐标": "sensing_mousey",
+            "大小": "looks_size",
+            "音量": "sound_volume",
+        }
 
     def convert(self, node):
         """
@@ -20,6 +35,19 @@ class ASTToScratch:
             return (1, [4, str(node.value)])
 
         elif isinstance(node, StringNode):
+            # 检查是否是内置reporter块
+            if node.value in self.builtin_reporters:
+                block_id = self.builder.generate_id()
+                self.builder.current_sprite["blocks"][block_id] = {
+                    "opcode": self.builtin_reporters[node.value],
+                    "next": None,
+                    "parent": None,
+                    "inputs": {},
+                    "fields": {},
+                    "shadow": False,
+                    "topLevel": False
+                }
+                return (2, block_id)
             # Scratch格式: [1, [10, "字符串"]]
             return (1, [10, node.value])
 
@@ -40,14 +68,26 @@ class ASTToScratch:
 
     def _convert_variable(self, node):
         """转换变量节点"""
+        # 查找变量ID
+        var_id = None
+        for vid, vdata in self.builder.current_sprite.get("variables", {}).items():
+            if vdata[0] == node.name:
+                var_id = vid
+                break
+        if var_id is None and self.builder.stage:
+            for vid, vdata in self.builder.stage.get("variables", {}).items():
+                if vdata[0] == node.name:
+                    var_id = vid
+                    break
+
         block_id = self.builder.generate_id()
         self.builder.current_sprite["blocks"][block_id] = {
             "opcode": "data_variable",
             "next": None,
             "parent": None,
             "inputs": {},
-            "fields": {"VARIABLE": [node.name, None]},
-            "shadow": True,
+            "fields": {"VARIABLE": [node.name, var_id]},
+            "shadow": False,
             "topLevel": False
         }
         return (2, block_id)
@@ -113,6 +153,12 @@ class ASTToScratch:
             "topLevel": False
         }
 
+        # 设置子块的parent指向当前块
+        if left_type == 2 and isinstance(left_value, str):
+            self.builder.current_sprite["blocks"][left_value]["parent"] = block_id
+        if right_type == 2 and isinstance(right_value, str):
+            self.builder.current_sprite["blocks"][right_value]["parent"] = block_id
+
         return (2, block_id)
 
     def _convert_unary(self, node):
@@ -139,6 +185,11 @@ class ASTToScratch:
                 "shadow": False,
                 "topLevel": False
             }
+
+            # 设置子块的parent指向当前块
+            if operand_type == 2 and isinstance(operand_value, str):
+                self.builder.current_sprite["blocks"][operand_value]["parent"] = block_id
+
             return (2, block_id)
 
         else:
@@ -222,5 +273,9 @@ class ASTToScratch:
                 "shadow": False,
                 "topLevel": False
             }
+
+        # 设置参数块的parent指向当前块
+        if arg_type == 2 and isinstance(arg_value, str):
+            self.builder.current_sprite["blocks"][arg_value]["parent"] = block_id
 
         return (2, block_id)

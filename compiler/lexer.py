@@ -49,8 +49,20 @@ class Lexer:
             elif self._current() in '><':
                 tokens.append(self._read_comparison())
             elif self._current() == '=':
-                tokens.append(Token(TokenType.OPERATOR, '=', self.pos))
-                self.pos += 1
+                # 检查是否是 ==
+                if self._peek() == '=':
+                    tokens.append(Token(TokenType.OPERATOR, '=', self.pos))
+                    self.pos += 2
+                else:
+                    tokens.append(Token(TokenType.OPERATOR, '=', self.pos))
+                    self.pos += 1
+            elif self._current() == '!':
+                # 检查是否是 !=
+                if self._peek() == '=':
+                    tokens.append(Token(TokenType.OPERATOR, '≠', self.pos))
+                    self.pos += 2
+                else:
+                    self.pos += 1  # 跳过单独的 !
             elif self._current() == '≠':
                 tokens.append(Token(TokenType.OPERATOR, '≠', self.pos))
                 self.pos += 1
@@ -108,7 +120,7 @@ class Lexer:
         start = self.pos
         self.pos += 1  # 跳过 ~
         name = ''
-        while self._current().isalnum() or self._current() in '_':
+        while self._current() != '\0' and (self._current().isalnum() or self._current() in '_' or ord(self._current()) > 127):
             name += self._current()
             self.pos += 1
         return Token(TokenType.VARIABLE, name, start)
@@ -127,12 +139,15 @@ class Lexer:
         """读取单词（逻辑运算符或函数名）"""
         start = self.pos
         word = ''
-        while self._current().isalnum() or self._current() in '_':
+        while self._current() != '\0' and (self._current().isalnum() or self._current() in '_' or ord(self._current()) > 127):
             word += self._current()
             self.pos += 1
 
         # 逻辑运算符
-        if word in ['且', '或', '非', 'and', 'or', 'not']:
+        if word in ['且', '或', '非', '不是', 'and', 'or', 'not']:
+            # 将"不是"映射为"非"
+            if word == '不是':
+                word = '非'
             return Token(TokenType.LOGIC, word, start)
 
         # 函数名

@@ -52,6 +52,10 @@ class BlockDefinitions:
             "pattern": r"当背景换成\s+(.+)|when backdrop switches to\s+(.+)",
             "fields": {"BACKDROP": 1}
         },
+        "当作为克隆体启动": {
+            "opcode": "control_start_as_clone",
+            "pattern": r"当作为克隆体启动时?|when I start as a clone"
+        },
     }
 
     # ==================== 动作积木 ====================
@@ -313,17 +317,13 @@ class BlockDefinitions:
             "pattern": r"克隆\s+(.+)|create clone of\s+(.+)",
             "inputs": {"CLONE_OPTION": 1}
         },
-        "当作为克隆体启动": {
-            "opcode": "control_start_as_clone",
-            "pattern": r"当作为克隆体启动|when I start as a clone"
-        },
         "删除克隆体": {
             "opcode": "control_delete_this_clone",
             "pattern": r"删除此克隆体|delete this clone"
         },
         "广播": {
             "opcode": "event_broadcast",
-            "pattern": r"广播\s+(.+?)(?:\s|$)|broadcast\s+(.+?)(?:\s|$)",
+            "pattern": r"广播\s+(.+)$|broadcast\s+(.+)$",
             "inputs": {"BROADCAST_INPUT": 1}
         },
         "广播并等待": {
@@ -336,6 +336,16 @@ class BlockDefinitions:
     # ==================== 侦测积木 ====================
     # 🔥 移除了只能在条件中使用的 reporter 积木
     SENSING = {
+        "碰到": {
+            "opcode": "sensing_touchingobject",
+            "pattern": r"碰到\s+(.+?)(?:\s|$)",
+            "inputs": {"TOUCHINGOBJECTMENU": 1}
+        },
+        "碰到颜色": {
+            "opcode": "sensing_touchingcolor",
+            "pattern": r"碰到颜色\s+(.+?)(?:\s|$)",
+            "inputs": {"COLOR": 1}
+        },
         "询问并等待": {
             "opcode": "sensing_askandwait",
             "pattern": r"询问\s+(.+?)\s*并等待",

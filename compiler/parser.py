@@ -765,6 +765,18 @@ class ScratchLangParser:
         if cmd.strip().startswith(('说 ', '想 ')):
             return self._create_say_think_block(cmd, parent, top_level)
 
+        # 特殊处理"移到 X 的 property Y 的 property"模式
+        gotoxy_match = re.match(r"移到\s+(.+?\s+的\s+(?:x position|y position|x坐标|y坐标))\s+(.+?\s+的\s+(?:x position|y position|x坐标|y坐标))$", cmd.strip())
+        if gotoxy_match:
+            x_expr = gotoxy_match.group(1).strip()
+            y_expr = gotoxy_match.group(2).strip()
+            x_input = self._parse_value(x_expr)
+            y_input = self._parse_value(y_expr)
+            block_id = self.builder.add_block("motion_gotoxy", {"X": x_input, "Y": y_input}, {}, parent, top_level)
+            if parent:
+                self.builder.current_sprite["blocks"][parent]["next"] = block_id
+            return block_id
+
         # 检查是否是自定义积木调用
         proc_info, arg_values = self.get_custom_block_info(cmd)
         if proc_info is not None:
@@ -835,6 +847,19 @@ class ScratchLangParser:
                                     "背景名称": "backdrop name"
                                 }
                                 fields[field_name] = [property_map.get(value, value), None]
+                            elif field_name == "VARIABLE":
+                                var_name = value[1:].strip() if value.startswith('~') else value.strip()
+                                var_id = None
+                                for vid, vdata in self.builder.current_sprite.get("variables", {}).items():
+                                    if vdata[0] == var_name:
+                                        var_id = vid
+                                        break
+                                if var_id is None and self.builder.stage:
+                                    for vid, vdata in self.builder.stage.get("variables", {}).items():
+                                        if vdata[0] == var_name:
+                                            var_id = vid
+                                            break
+                                fields[field_name] = [var_name, var_id]
                             else:
                                 fields[field_name] = [value, None]
                         else:
@@ -937,6 +962,10 @@ class ScratchLangParser:
         if '(' in text or ')' in text:
             return True
 
+        # 包含算术运算符 -> 复杂表达式
+        if any(op in text for op in ['+', '-', '*', '/']):
+            return True
+
         # 包含变量引用和运算符 -> 复杂表达式
         if '~' in text and any(op in text for op in ['+', '-', '*', '/', '>', '<', '=', '且', '或']):
             return True
@@ -952,9 +981,47 @@ class ScratchLangParser:
 
         return False
 
+    def _strip_outer_parentheses(self, text):
+        """移除匹配的外层括号"""
+        text = text.strip()
+        while text.startswith('(') and text.endswith(')'):
+            # 检查括号是否匹配
+            depth = 0
+            matched = True
+            for i, char in enumerate(text):
+                if char == '(':
+                    depth += 1
+                elif char == ')':
+                    depth -= 1
+                # 如果在中间位置depth变为0，说明不是外层括号
+                if depth == 0 and i < len(text) - 1:
+                    matched = False
+                    break
+            if matched and depth == 0:
+                text = text[1:-1].strip()
+            else:
+                break
+        return text
+
+    def _split_by_operator(self, text, operator):
+        """按运算符分割，考虑括号匹配"""
+        depth = 0
+        i = 0
+        while i < len(text):
+            char = text[i]
+            if char == '(':
+                depth += 1
+            elif char == ')':
+                depth -= 1
+            elif depth == 0 and text[i:i+len(operator)] == operator:
+                return [text[:i], text[i+len(operator):]]
+            i += 1
+        return None
+
     def _parse_value(self, text):
         """解析值"""
         text = text.strip()
+        text = self._strip_outer_parentheses(text)
 
         # 检测是否为复杂表达式
         if self._is_complex_expression(text):
@@ -970,48 +1037,43 @@ class ScratchLangParser:
                 # 降级到旧逻辑
                 pass
 
-        # 1. 逻辑运算符
-        if ' 或 ' in text:
-            parts = text.split(' 或 ', 1)
+        # 1. 逻辑运算符（考虑括号匹配）
+        parts = self._split_by_operator(text, ' 或 ')
+        if parts:
             input1 = self._parse_value(parts[0])
             input2 = self._parse_value(parts[1])
             return [2, self.builder.add_block("operator_or", {"OPERAND1": input1, "OPERAND2": input2}, {}, None, False)]
-        
-        if ' 且 ' in text:
-            parts = text.split(' 且 ', 1)
+
+        parts = self._split_by_operator(text, ' 且 ')
+        if parts:
             input1 = self._parse_value(parts[0])
             input2 = self._parse_value(parts[1])
             return [2, self.builder.add_block("operator_and", {"OPERAND1": input1, "OPERAND2": input2}, {}, None, False)]
 
-        # 2. 比较运算符
+        # 2. 比较运算符（考虑括号匹配）
         # 处理 >= 和 <= (Scratch 没有原生支持，需要用 not 组合实现)
-        if '>=' in text:
-            parts = text.split('>=', 1)
-            if len(parts) == 2:
-                input1 = self._parse_value(parts[0].strip())
-                input2 = self._parse_value(parts[1].strip())
-                # a >= b 等价于 not (a < b)
-                lt_block = self.builder.add_block("operator_lt", {"OPERAND1": input1, "OPERAND2": input2}, {}, None, False)
-                not_block = self.builder.add_block("operator_not", {"OPERAND": [2, lt_block]}, {}, None, False)
-                return [2, not_block]
+        parts = self._split_by_operator(text, '>=')
+        if parts:
+            input1 = self._parse_value(parts[0].strip())
+            input2 = self._parse_value(parts[1].strip())
+            lt_block = self.builder.add_block("operator_lt", {"OPERAND1": input1, "OPERAND2": input2}, {}, None, False)
+            not_block = self.builder.add_block("operator_not", {"OPERAND": [2, lt_block]}, {}, None, False)
+            return [2, not_block]
 
-        if '<=' in text:
-            parts = text.split('<=', 1)
-            if len(parts) == 2:
-                input1 = self._parse_value(parts[0].strip())
-                input2 = self._parse_value(parts[1].strip())
-                # a <= b 等价于 not (a > b)
-                gt_block = self.builder.add_block("operator_gt", {"OPERAND1": input1, "OPERAND2": input2}, {}, None, False)
-                not_block = self.builder.add_block("operator_not", {"OPERAND": [2, gt_block]}, {}, None, False)
-                return [2, not_block]
+        parts = self._split_by_operator(text, '<=')
+        if parts:
+            input1 = self._parse_value(parts[0].strip())
+            input2 = self._parse_value(parts[1].strip())
+            gt_block = self.builder.add_block("operator_gt", {"OPERAND1": input1, "OPERAND2": input2}, {}, None, False)
+            not_block = self.builder.add_block("operator_not", {"OPERAND": [2, gt_block]}, {}, None, False)
+            return [2, not_block]
 
         for op_char, op_code in [('>', 'operator_gt'), ('<', 'operator_lt'), ('=', 'operator_equals')]:
-            if op_char in text:
-                parts = text.split(op_char, 1)
-                if len(parts) == 2:
-                    input1 = self._parse_value(parts[0].strip())
-                    input2 = self._parse_value(parts[1].strip())
-                    return [2, self.builder.add_block(op_code, {"OPERAND1": input1, "OPERAND2": input2}, {}, None, False)]
+            parts = self._split_by_operator(text, op_char)
+            if parts:
+                input1 = self._parse_value(parts[0].strip())
+                input2 = self._parse_value(parts[1].strip())
+                return [2, self.builder.add_block(op_code, {"OPERAND1": input1, "OPERAND2": input2}, {}, None, False)]
 
         # 3. 连接表达式
         if ('+' in text and not text.startswith('+')) or text.startswith("连接("):
@@ -1029,7 +1091,13 @@ class ScratchLangParser:
             input1 = self._parse_value(rand_match.group(1))
             input2 = self._parse_value(rand_match.group(2))
             return [2, self.builder.add_block("operator_random", {"FROM": input1, "TO": input2}, {}, None, False)]
-            
+
+        rand_match2 = re.match(r"在\s*(.+?)\s*到\s*(.+?)\s*间取随机数", text)
+        if rand_match2:
+            input1 = self._parse_value(rand_match2.group(1))
+            input2 = self._parse_value(rand_match2.group(2))
+            return [2, self.builder.add_block("operator_random", {"FROM": input1, "TO": input2}, {}, None, False)]
+
         # 5. ~ 前缀
         if text.startswith('~'):
             return self._parse_variable_or_reporter(text)
@@ -1049,23 +1117,39 @@ class ScratchLangParser:
         if text in self.SPECIAL_TARGETS:
             val = self.SPECIAL_TARGETS[text]
             return [1, [11, val, val]]
-        
-        # 9. 默认: 普通字符串
+
+        # 9. Reporter块识别（无~前缀）
+        builtin_reporters = ["回答", "x坐标", "y坐标", "方向", "计时器", "响度",
+                            "鼠标x坐标", "鼠标y坐标", "鼠标的x坐标", "鼠标的y坐标",
+                            "大小", "音量", "造型编号", "造型名称", "背景编号", "背景名称"]
+        if text in builtin_reporters:
+            return self._parse_variable_or_reporter('~' + text)
+
+        # 检查是否匹配 "sprite 的 property" 模式（中英文）
+        if re.match(r"^.+?\s*的\s*(x坐标|y坐标|方向|造型编号|造型名称|大小|音量|背景编号|背景名称|x position|y position|direction|costume #|costume name|size|volume|backdrop #|backdrop name)$", text):
+            return self._parse_variable_or_reporter('~' + text)
+
+        # 检查是否匹配 "到 sprite 的距离" 模式
+        if re.match(r"^到\s+.+?\s*的距离$", text):
+            return self._parse_variable_or_reporter('~' + text)
+
+        # 10. 默认: 普通字符串
         return [1, [10, text]]
     
     def _parse_condition(self, text):
         """解析条件表达式"""
         text = text.strip()
-        
-        # 1. 逻辑运算符
-        if ' 或 ' in text:
-            parts = text.split(' 或 ', 1)
+        text = self._strip_outer_parentheses(text)
+
+        # 1. 逻辑运算符（考虑括号匹配）
+        parts = self._split_by_operator(text, ' 或 ')
+        if parts:
             input1 = self._parse_condition(parts[0])
             input2 = self._parse_condition(parts[1])
             return [2, self.builder.add_block("operator_or", {"OPERAND1": input1, "OPERAND2": input2}, {}, None, False)]
-        
-        if ' 且 ' in text:
-            parts = text.split(' 且 ', 1)
+
+        parts = self._split_by_operator(text, ' 且 ')
+        if parts:
             input1 = self._parse_condition(parts[0])
             input2 = self._parse_condition(parts[1])
             return [2, self.builder.add_block("operator_and", {"OPERAND1": input1, "OPERAND2": input2}, {}, None, False)]
@@ -1086,35 +1170,29 @@ class ScratchLangParser:
         if text in ['鼠标按下', '鼠标按下?']:
             return [2, self.builder.add_block("sensing_mousedown", {}, {}, None, False)]
         
-        # 5. 比较运算符
-        # 处理 >= 和 <= (Scratch 没有原生支持，需要用 not 组合实现)
-        if '>=' in text:
-            parts = text.split('>=', 1)
-            if len(parts) == 2:
-                input1 = self._parse_operand(parts[0].strip())
-                input2 = self._parse_operand(parts[1].strip())
-                # a >= b 等价于 not (a < b)
-                lt_block = self.builder.add_block("operator_lt", {"OPERAND1": input1, "OPERAND2": input2}, {}, None, False)
-                not_block = self.builder.add_block("operator_not", {"OPERAND": [2, lt_block]}, {}, None, False)
-                return [2, not_block]
+        # 5. 比较运算符（考虑括号匹配）
+        parts = self._split_by_operator(text, '>=')
+        if parts:
+            input1 = self._parse_operand(parts[0].strip())
+            input2 = self._parse_operand(parts[1].strip())
+            lt_block = self.builder.add_block("operator_lt", {"OPERAND1": input1, "OPERAND2": input2}, {}, None, False)
+            not_block = self.builder.add_block("operator_not", {"OPERAND": [2, lt_block]}, {}, None, False)
+            return [2, not_block]
 
-        if '<=' in text:
-            parts = text.split('<=', 1)
-            if len(parts) == 2:
-                input1 = self._parse_operand(parts[0].strip())
-                input2 = self._parse_operand(parts[1].strip())
-                # a <= b 等价于 not (a > b)
-                gt_block = self.builder.add_block("operator_gt", {"OPERAND1": input1, "OPERAND2": input2}, {}, None, False)
-                not_block = self.builder.add_block("operator_not", {"OPERAND": [2, gt_block]}, {}, None, False)
-                return [2, not_block]
+        parts = self._split_by_operator(text, '<=')
+        if parts:
+            input1 = self._parse_operand(parts[0].strip())
+            input2 = self._parse_operand(parts[1].strip())
+            gt_block = self.builder.add_block("operator_gt", {"OPERAND1": input1, "OPERAND2": input2}, {}, None, False)
+            not_block = self.builder.add_block("operator_not", {"OPERAND": [2, gt_block]}, {}, None, False)
+            return [2, not_block]
 
         for op_char, op_code in [('>', 'operator_gt'), ('<', 'operator_lt'), ('=', 'operator_equals')]:
-            if op_char in text:
-                parts = text.split(op_char, 1)
-                if len(parts) == 2:
-                    input1 = self._parse_operand(parts[0].strip())
-                    input2 = self._parse_operand(parts[1].strip())
-                    return [2, self.builder.add_block(op_code, {"OPERAND1": input1, "OPERAND2": input2}, {}, None, False)]
+            parts = self._split_by_operator(text, op_char)
+            if parts:
+                input1 = self._parse_operand(parts[0].strip())
+                input2 = self._parse_operand(parts[1].strip())
+                return [2, self.builder.add_block(op_code, {"OPERAND1": input1, "OPERAND2": input2}, {}, None, False)]
         
         # 6. 默认
         return self._parse_value(text)
@@ -1188,11 +1266,11 @@ class ScratchLangParser:
                     self.builder.current_sprite["blocks"][shadow_id]["parent"] = reporter_id
                 return [2, reporter_id]
             
-            property_match = re.match(r"^(.+?)\s*的\s*(x坐标|y坐标|方向|造型编号|造型名称|大小|音量|背景编号|背景名称)$", var_or_reporter)
+            property_match = re.match(r"^(.+?)\s*的\s*(x坐标|y坐标|方向|造型编号|造型名称|大小|音量|背景编号|背景名称|x position|y position|direction|costume #|costume name|size|volume|backdrop #|backdrop name)$", var_or_reporter)
             if property_match:
                 sprite_name = property_match.group(1).strip()
                 prop = property_match.group(2).strip()
-                
+
                 property_map = {
                     "x坐标": "x position",
                     "y坐标": "y position",
@@ -1202,16 +1280,33 @@ class ScratchLangParser:
                     "大小": "size",
                     "音量": "volume",
                     "背景编号": "backdrop #",
-                    "背景名称": "backdrop name"
+                    "背景名称": "backdrop name",
+                    # English property names (already in Scratch format)
+                    "x position": "x position",
+                    "y position": "y position",
+                    "direction": "direction",
+                    "costume #": "costume #",
+                    "costume name": "costume name",
+                    "size": "size",
+                    "volume": "volume",
+                    "backdrop #": "backdrop #",
+                    "backdrop name": "backdrop name"
                 }
-                
+
                 obj_val = TARGET_STAGE if sprite_name == "舞台" else sprite_name
+                # 创建 sensing_of_object_menu shadow block
+                menu_id = self.builder.add_shadow_block(
+                    "sensing_of_object_menu",
+                    {"OBJECT": [obj_val, None]}
+                )
                 reporter_id = self.builder.add_block(
                     "sensing_of",
-                    {"OBJECT": [1, [11, obj_val, obj_val]]},
+                    {"OBJECT": [1, menu_id]},
                     {"PROPERTY": [property_map[prop], None]},
                     None, False
                 )
+                # 设置 shadow 的 parent
+                self.builder.current_sprite["blocks"][menu_id]["parent"] = reporter_id
                 return [2, reporter_id]
             
             return self._create_variable_block(var_or_reporter)
@@ -1245,7 +1340,7 @@ class ScratchLangParser:
                     )
                     return [2, reporter_id]
         
-        print(f"⚠️ 警告: 未定义的变量 '~{var_name}'，将作为字符串处理")
+        print(f"警告: 未定义的变量 '~{var_name}'，将作为字符串处理")
         return [1, [10, var_name]]
     
     def _parse_operand(self, text):
@@ -1254,6 +1349,21 @@ class ScratchLangParser:
 
         if text.startswith('~'):
             return self._parse_variable_or_reporter(text)
+
+        # 检查是否是reporter块（无~前缀）
+        builtin_reporters = ["回答", "x坐标", "y坐标", "方向", "计时器", "响度",
+                            "鼠标x坐标", "鼠标y坐标", "鼠标的x坐标", "鼠标的y坐标",
+                            "大小", "音量", "造型编号", "造型名称", "背景编号", "背景名称"]
+        if text in builtin_reporters:
+            return self._parse_variable_or_reporter('~' + text)
+
+        # 检查是否匹配 "sprite 的 property" 模式（中英文）
+        if re.match(r"^.+?\s*的\s*(x坐标|y坐标|方向|造型编号|造型名称|大小|音量|背景编号|背景名称|x position|y position|direction|costume #|costume name|size|volume|backdrop #|backdrop name)$", text):
+            return self._parse_variable_or_reporter('~' + text)
+
+        # 检查是否匹配 "到 sprite 的距离" 模式
+        if re.match(r"^到\s+.+?\s*的距离$", text):
+            return self._parse_variable_or_reporter('~' + text)
 
         try:
             num_value = float(text)
@@ -1435,11 +1545,13 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("用法: python parser.py <输入文件.sl> [-o 输出文件.sb3]")
         sys.exit(1)
-    
+
     input_file = sys.argv[1]
-    output_file = sys.argv[3] if len(sys.argv) > 3 else "output.sb3"
-    
+    output_file = "output.sb3"
+    if len(sys.argv) > 3 and sys.argv[2] == "-o":
+        output_file = sys.argv[3]
+
     parser = ScratchLangParser()
     parser.parse_file(input_file)
     parser.compile(output_file)
-    print(f"✅ 编译成功: {output_file}")
+    print(f"编译成功: {output_file}")
