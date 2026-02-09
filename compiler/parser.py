@@ -5,6 +5,7 @@
 import re
 import os
 import json
+import logging
 from .builder import SB3Builder
 from .blocks import BlockDefinitions
 from .exceptions import ParseError, SecurityError, AssetError
@@ -57,8 +58,13 @@ class ScratchLangParser:
             resolved_real = os.path.realpath(resolved)
             base_real = os.path.realpath(self.current_dir)
 
+            # 使用 normcase 进行跨平台大小写规范化（Windows 不区分大小写）
+            resolved_normalized = os.path.normcase(resolved_real)
+            base_normalized = os.path.normcase(base_real)
+            sep_normalized = os.path.normcase(os.sep)
+
             # 检查路径是否在项目目录或其子目录内
-            if not resolved_real.startswith(base_real + os.sep) and resolved_real != base_real:
+            if not resolved_normalized.startswith(base_normalized + sep_normalized) and resolved_normalized != base_normalized:
                 raise SecurityError(f"路径 '{path}' 超出项目目录范围，已拒绝访问")
 
         return resolved
@@ -543,8 +549,14 @@ class ScratchLangParser:
 
         # 尝试匹配每个自定义积木
         for proc_name, proc_info in self.custom_blocks[sprite_name].items():
-            # 检查命令是否以积木名开头
+            # 检查命令是否匹配积木名（确保单词边界，防止 "process" 误匹配 "pro"）
             if cmd.startswith(proc_name):
+                # 检查匹配后的字符：必须是字符串结尾、空格或左括号
+                next_char_idx = len(proc_name)
+                if next_char_idx < len(cmd):
+                    next_char = cmd[next_char_idx]
+                    if next_char not in ' (':
+                        continue  # 不是完整匹配，跳过
                 rest = cmd[len(proc_name):].strip()
                 arg_count = len(proc_info["argumentnames"])
 
@@ -802,10 +814,6 @@ class ScratchLangParser:
                             
                             if input_name == "CONDITION":
                                 inputs[input_name] = self._parse_condition(value)
-                            elif input_name == "KEY_OPTION" and opcode == "sensing_keypressed":
-                                shadow_id = self._create_key_shadow(value)
-                                inputs[input_name] = [1, shadow_id]
-                                shadow_blocks[input_name] = shadow_id
                             elif input_name == "TOUCHINGOBJECTMENU":
                                 shadow_id = self._create_touching_shadow(value)
                                 inputs[input_name] = [1, shadow_id]
@@ -1034,6 +1042,8 @@ class ScratchLangParser:
                 block_type, block_value = self.ast_converter.convert(ast)
                 return [block_type, block_value]
             except Exception as e:
+                # AST 解析失败，降级到旧逻辑
+                logging.debug(f"AST 解析失败，使用旧逻辑: {e}")
                 # 降级到旧逻辑
                 pass
 

@@ -65,10 +65,10 @@ class ScratchLangHighlighter(QSyntaxHighlighter):
             pattern = QRegExp(f"\\b{word}\\b")
             self.highlighting_rules.append((pattern, keyword_format))
 
-        # 数字格式
+        # 数字格式 (支持 .5, 0.5, 5, 5.0 等)
         number_format = QTextCharFormat()
         number_format.setForeground(QColor("#855CD6"))
-        self.highlighting_rules.append((QRegExp("\\b[0-9]+\\.?[0-9]*\\b"), number_format))
+        self.highlighting_rules.append((QRegExp("\\b\\d*\\.?\\d+\\b"), number_format))
 
         # 字符串格式
         string_format = QTextCharFormat()

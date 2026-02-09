@@ -150,13 +150,18 @@ class ExtensionManager:
         """
         # 尝试匹配常见的扩展 ID 定义模式
         patterns = [
-            r"getInfo\s*\(\s*\)\s*{[^}]*id\s*:\s*['\"]([^'\"]+)['\"]",
+            # getInfo() { return { id: "xxx" } } 或 getInfo() { id: "xxx" }
+            r"getInfo\s*\(\s*\)\s*\{[^}]*?id\s*:\s*['\"]([^'\"]+)['\"]",
+            # Return statement with id
+            r"return\s*\{[^}]*?id\s*:\s*['\"]([^'\"]+)['\"]",
+            # 直接的 id: "xxx"
             r"id\s*:\s*['\"]([^'\"]+)['\"]",
+            # extensionId = "xxx"
             r"extensionId\s*=\s*['\"]([^'\"]+)['\"]",
         ]
 
         for pattern in patterns:
-            match = re.search(pattern, js_code, re.DOTALL)
+            match = re.search(pattern, js_code, re.DOTALL | re.MULTILINE)
             if match:
                 return match.group(1)
 

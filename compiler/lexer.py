@@ -49,9 +49,9 @@ class Lexer:
             elif self._current() in '><':
                 tokens.append(self._read_comparison())
             elif self._current() == '=':
-                # 检查是否是 ==
+                # 支持 == 和 = 作为相等运算符（Scratch 使用 =）
                 if self._peek() == '=':
-                    tokens.append(Token(TokenType.OPERATOR, '=', self.pos))
+                    tokens.append(Token(TokenType.OPERATOR, '==', self.pos))
                     self.pos += 2
                 else:
                     tokens.append(Token(TokenType.OPERATOR, '=', self.pos))
@@ -75,6 +75,13 @@ class Lexer:
             elif self._current() == ',':
                 tokens.append(Token(TokenType.COMMA, ',', self.pos))
                 self.pos += 1
+            elif self._current() == '.':
+                # 处理小数点：.5 是有效数字，单独的 . 是错误
+                if self._peek().isdigit():
+                    tokens.append(self._read_number())
+                else:
+                    from compiler.exceptions import ParseError
+                    raise ParseError(f"无效的字符: '.'", self.pos)
             else:
                 tokens.append(self._read_word())
 
@@ -95,12 +102,63 @@ class Lexer:
         return self.text[pos]
 
     def _read_number(self):
-        """读取数字"""
+        """读取数字 - 支持整数、浮点数"""
+        from compiler.exceptions import ParseError
+
         start = self.pos
-        while self._current().isdigit() or self._current() == '.':
+
+        # 状态机解析数字，确保格式正确
+        has_digit = False
+        has_dot = False
+
+        # 读取整数部分
+        while self._current().isdigit():
+            has_digit = True
             self.pos += 1
-        value = self.text[start:self.pos]
-        return Token(TokenType.NUMBER, float(value) if '.' in value else int(value), start)
+
+        # 读取小数部分（只能有一个小数点）
+        if self._current() == '.':
+            # 检查后面是否还有另一个小数点（如 1.2.3）
+            peek_pos = self.pos + 1
+            while peek_pos < len(self.text) and self.text[peek_pos].isdigit():
+                peek_pos += 1
+            if peek_pos < len(self.text) and self.text[peek_pos] == '.':
+                # 发现 1.2.3 这种格式，抛出错误
+                raise ParseError(f"无效的数字格式: 多个小数点", start)
+
+            has_dot = True
+            self.pos += 1
+            # 小数点后必须有数字
+            while self._current().isdigit():
+                has_digit = True
+                self.pos += 1
+
+        # 科学计数法
+        if self._current().lower() == 'e':
+            self.pos += 1
+            if self._current() in '+-':
+                self.pos += 1
+            # e 后必须有数字
+            e_has_digit = False
+            while self._current().isdigit():
+                e_has_digit = True
+                self.pos += 1
+            if not e_has_digit:
+                raise ParseError(f"科学计数法格式错误: 'e' 后缺少数字", start)
+
+        value_str = self.text[start:self.pos]
+
+        if not has_digit:
+            raise ParseError(f"无效的数字格式: '{value_str}'", start)
+
+        # 转换为数值
+        try:
+            if has_dot or 'e' in value_str.lower():
+                return Token(TokenType.NUMBER, float(value_str), start)
+            else:
+                return Token(TokenType.NUMBER, int(value_str), start)
+        except ValueError as e:
+            raise ParseError(f"无效的数字格式: '{value_str}' - {e}", start)
 
     def _read_string(self):
         """读取字符串"""

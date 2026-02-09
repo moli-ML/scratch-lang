@@ -52,6 +52,61 @@ def validate_image_format(filepath: str, data: bytes) -> bool:
     return True
 
 
+def _get_wav_audio_info(data: bytes) -> tuple:
+    """解析 WAV 文件头，获取采样率和采样数
+
+    Args:
+        data: WAV 文件数据
+
+    Returns:
+        tuple: (sample_rate, sample_count) 或 (None, None) 如果解析失败
+    """
+    try:
+        # WAV 文件结构:
+        # 0-3: "RIFF"
+        # 4-7: 文件大小
+        # 8-11: "WAVE"
+        # 12-15: "fmt "
+        # 16-19: fmt chunk size
+        # 20-21: Audio format (1 = PCM)
+        # 22-23: Number of channels
+        # 24-27: Sample rate
+        # 28-31: Byte rate
+        # 32-33: Block align
+        # 34-35: Bits per sample
+
+        if len(data) < 44:
+            return None, None
+
+        # 验证是 WAV 文件
+        if data[:4] != b'RIFF' or data[8:12] != b'WAVE':
+            return None, None
+
+        # 读取 fmt chunk
+        fmt_chunk_size = struct.unpack('<I', data[16:20])[0]
+        num_channels = struct.unpack('<H', data[22:24])[0]
+        sample_rate = struct.unpack('<I', data[24:28])[0]
+        bits_per_sample = struct.unpack('<H', data[34:36])[0]
+
+        # 查找 data chunk
+        pos = 12 + 8 + fmt_chunk_size  # 跳过 RIFF header 和 fmt chunk
+        while pos < len(data) - 8:
+            chunk_id = data[pos:pos+4]
+            chunk_size = struct.unpack('<I', data[pos+4:pos+8])[0]
+            if chunk_id == b'data':
+                # data chunk 找到，计算采样数
+                data_size = min(chunk_size, len(data) - pos - 8)
+                bytes_per_sample = (bits_per_sample // 8) * num_channels
+                if bytes_per_sample > 0:
+                    sample_count = data_size // bytes_per_sample
+                    return sample_rate, sample_count
+            pos += 8 + chunk_size
+
+        return None, None
+    except Exception:
+        return None, None
+
+
 def validate_sound_format(filepath: str, data: bytes) -> bool:
     """验证音频文件格式是否有效
 
@@ -249,13 +304,23 @@ class AssetManager:
 
         self.assets[filename] = data
 
+        # 尝试获取音频文件的采样信息
+        sample_rate = 48000
+        sample_count = 0
+
+        if ext == 'wav':
+            wav_rate, wav_count = _get_wav_audio_info(data)
+            if wav_rate is not None:
+                sample_rate = wav_rate
+                sample_count = wav_count
+
         return {
             "assetId": md5,
             "name": os.path.basename(filepath),
             "md5ext": filename,
             "dataFormat": ext,
-            "rate": 48000,
-            "sampleCount": 0
+            "rate": sample_rate,
+            "sampleCount": sample_count
         }
     
     def create_default_svg(self, name, color="#FF6680"):

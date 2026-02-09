@@ -405,14 +405,13 @@ class MainWindow(QMainWindow):
             self.output.append("⚠️ 编译已取消")
             self.statusBar().showMessage("已取消")
             return
-        
+
         temp_file = None
         try:
             # 保存临时文件
-            fd, temp_file = tempfile.mkstemp(suffix='.sl', prefix='scratch_compile_')
-            os.close(fd)
-            with open(temp_file, 'w', encoding='utf-8') as f:
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.sl', prefix='scratch_compile_', delete=False, encoding='utf-8') as f:
                 f.write(self.editor.toPlainText())
+                temp_file = f.name
             
             # 解析代码
             self.output.append("🔍 解析代码...")

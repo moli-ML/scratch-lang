@@ -262,14 +262,14 @@ class SB3Decompiler:
         elif opcode == 'looks_sayforsecs':
             message = self._get_input_value(blocks, block, 'MESSAGE')
             secs = self._get_input_value(blocks, block, 'SECS')
-            return f"说 {message} 持续 {secs} 秒"
+            return f"说 {message} {secs}秒"
         elif opcode == 'looks_think':
             message = self._get_input_value(blocks, block, 'MESSAGE')
             return f"想 {message}"
         elif opcode == 'looks_thinkforsecs':
             message = self._get_input_value(blocks, block, 'MESSAGE')
             secs = self._get_input_value(blocks, block, 'SECS')
-            return f"想 {message} 持续 {secs} 秒"
+            return f"想 {message} {secs}秒"
         elif opcode == 'looks_switchcostumeto':
             costume = self._get_input_value(blocks, block, 'COSTUME')
             return f"切换造型到 {costume}"
@@ -690,7 +690,7 @@ class SB3Decompiler:
             return f"({operand1} 或 {operand2})"
         elif opcode == 'operator_not':
             operand = self._get_input_value(blocks, block, 'OPERAND')
-            return f"(不是 {operand})"
+            return f"(非 {operand})"
 
         # 字符串运算
         elif opcode == 'operator_join':
